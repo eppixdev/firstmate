@@ -25,12 +25,11 @@ harness_pid() {
     if printf '%s' "$(basename "$comm")" | grep -qE "$HARNESS_RE"; then
       echo "$pid"; return 0
     fi
-    # Bare interpreter (e.g. node): match the harness name in its script path.
-    case "$comm" in
-      *node*|*python*) printf '%s' "$args" | grep -qE "$HARNESS_RE" && { echo "$pid"; return 0; } ;;
-    esac
+    # Wrapped harnesses can appear under a generic binary such as bwrap,
+    # node, or python while still exposing the harness in argv.
+    printf '%s' "$args" | grep -qE "$HARNESS_RE" && { echo "$pid"; return 0; }
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-    [ -n "$pid" ] && [ "$pid" -gt 1 ] || return 1
+    [ -n "$pid" ] && [ "$pid" -gt 0 ] || return 1
   done
   return 1
 }

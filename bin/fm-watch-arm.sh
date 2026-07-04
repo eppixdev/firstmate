@@ -126,20 +126,18 @@ esac
 if [ "$mode" = restart ]; then
   # Home-scoped stop: only the watcher pid recorded in THIS home's lock.
   lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-  if fm_pid_alive "$lock_pid"; then
-    if watch_lock_matches_pid "$lock_pid"; then
-      kill -TERM "$lock_pid" 2>/dev/null || true
-      # Wait for it to actually exit before relaunching, so the fresh watcher
-      # either takes a released lock or reclaims a now-dead-pid stale lock instead
-      # of seeing the dying one as a live holder and no-opping.
-      i=0
-      while [ "$i" -lt 50 ] && fm_pid_alive "$lock_pid"; do
-        sleep 0.1
-        i=$((i + 1))
-      done
-    else
-      clear_stale_recorded_watcher_lock
-    fi
+  if watch_lock_matches_pid "$lock_pid"; then
+    kill -TERM "$lock_pid" 2>/dev/null || true
+    # Wait for it to actually exit before relaunching, so the fresh watcher
+    # either takes a released lock or reclaims a now-dead-pid stale lock instead
+    # of seeing the dying one as a live holder and no-opping.
+    i=0
+    while [ "$i" -lt 50 ] && fm_pid_alive "$lock_pid"; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+  else
+    clear_stale_recorded_watcher_lock
   fi
 fi
 

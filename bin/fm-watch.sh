@@ -55,6 +55,35 @@ mkdir -p "$STATE"
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
 WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-300}}
+
+watch_lock_matches_pid() {
+  local pid=$1 lock_home lock_path lock_identity current_identity
+  lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
+  lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
+  [ "$lock_home" = "$FM_HOME" ] || return 1
+  [ "$lock_path" = "$WATCH_PATH" ] || return 1
+  [ -n "$lock_identity" ] || return 1
+  current_identity=$(fm_pid_identity "$pid") || return 1
+  [ "$current_identity" = "$lock_identity" ]
+}
+
+clear_stale_recorded_watcher_lock() {
+  local lock_home lock_path lock_identity
+  lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
+  lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
+  [ "$lock_home" = "$FM_HOME" ] || return 0
+  [ "$lock_path" = "$WATCH_PATH" ] || return 0
+  [ -n "$lock_identity" ] || return 0
+  fm_lock_remove_path "$WATCH_LOCK" || true
+}
+
+recorded_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+if [ -n "$recorded_pid" ] && ! watch_lock_matches_pid "$recorded_pid"; then
+  clear_stale_recorded_watcher_lock
+fi
+
 if ! fm_lock_try_acquire "$WATCH_LOCK"; then
   BEAT="$STATE/.last-watcher-beat"
   if [ -n "${FM_LOCK_HELD_PID:-}" ]; then

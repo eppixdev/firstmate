@@ -508,6 +508,45 @@ test_arm_starts_and_self_heals() {
   pass "arm starts+confirms a fresh watcher on a clean lock and self-heals a dead-pid lock (never healthy off a dead pid)"
 }
 
+test_arm_self_heals_reused_pid_lock() {
+  local dir state fakebin armout live armpid i lock_pid identity
+  dir=$(make_case arm-reused-pid)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  sleep 300 &
+  live=$!
+  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live") || fail "could not identify reused pid holder"
+  mkdir "$state/.watch.lock"
+  printf '%s\n' "$live" > "$state/.watch.lock/pid"
+  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  printf '%s\n' "stale watcher identity" > "$state/.watch.lock/pid-identity"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH_ARM" > "$armout" &
+  armpid=$!
+  i=0
+  while [ "$i" -lt 80 ]; do
+    grep -qF 'watcher: started pid=' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout" || fail "arm did not self-heal a reused-pid stale lock"
+  lock_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  [ -n "$lock_pid" ] || fail "self-healed lock did not record a watcher pid"
+  [ "$lock_pid" != "$live" ] || fail "self-healed watcher lock still points at the unrelated reused pid"
+  grep -F "watcher: started pid=$lock_pid (beacon fresh)" "$armout" >/dev/null \
+    || fail "self-healed started line did not name the confirmed watcher"
+  current_identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live") || fail "could not re-read reused pid identity"
+  [ "$current_identity" = "$identity" ] || fail "unrelated reused pid changed identity during self-heal"
+  is_live_non_zombie "$live" || fail "self-heal killed the unrelated reused pid"
+  kill "$armpid" "$lock_pid" "$live" 2>/dev/null || true
+  wait "$armpid" 2>/dev/null || true
+  wait "$live" 2>/dev/null || true
+  pass "arm self-heals a reused-pid watcher lock without killing the unrelated process"
+}
+
 test_arm_hup_cleans_child_and_temp_output() {
   local dir state fakebin armout i armpid lock_pid status
   dir=$(make_case arm-hup-cleanup)
@@ -666,6 +705,7 @@ test_watch_restart_rejects_reused_pid
 test_watcher_self_evicts_on_lock_takeover
 test_arm_reports_healthy_for_live_fresh_watcher
 test_arm_starts_and_self_heals
+test_arm_self_heals_reused_pid_lock
 test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
