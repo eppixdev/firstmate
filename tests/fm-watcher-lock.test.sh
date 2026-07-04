@@ -646,7 +646,8 @@ test_arm_waits_for_peer_beacon_after_child_stands_down() {
   printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
   (
     sleep 1
-    touch "$state/.last-watcher-beat"
+    FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_watcher_beat_write "$2" "$3" "$4" "$5"' \
+      _ "$LIB" "$state/.last-watcher-beat" "$peer" "$WATCH" "$dir"
   ) &
   beater=$!
   status=0
@@ -658,6 +659,24 @@ test_arm_waits_for_peer_beacon_after_child_stands_down() {
   kill "$peer" 2>/dev/null || true
   wait "$peer" 2>/dev/null || true
   pass "arm waits for a peer watcher beacon after child stands down"
+}
+
+test_arm_rejects_leftover_fresh_beacon_until_child_owns_it() {
+  local dir state fakebin armout status
+  dir=$(make_case arm-leftover-fresh-beat)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  touch "$state/.last-watcher-beat"
+  status=0
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_WATCH_PRE_BEAT_DELAY=2 FM_ARM_CONFIRM_TIMEOUT=1 "$WATCH_ARM" > "$armout" || status=$?
+  [ "$status" -ne 0 ] || fail "arm exited zero off a leftover fresh beacon before the child wrote its own beat"
+  grep -F 'watcher: FAILED - no live watcher with a fresh beacon' "$armout" >/dev/null \
+    || fail "arm did not fail loudly when only a leftover fresh beacon existed"
+  ! grep -qF 'watcher: started' "$armout" || fail "arm reported started off a leftover fresh beacon"
+  ! grep -qF 'watcher: healthy' "$armout" || fail "arm reported healthy off a leftover fresh beacon"
+  pass "arm refuses a leftover fresh beacon until the child watcher writes its own owned beat"
 }
 
 test_arm_fails_loud_when_no_fresh_watcher_confirmable() {
@@ -710,4 +729,5 @@ test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_arm_waits_for_peer_beacon_after_child_stands_down
+test_arm_rejects_leftover_fresh_beacon_until_child_owns_it
 test_arm_fails_loud_when_no_fresh_watcher_confirmable

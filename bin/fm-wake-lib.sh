@@ -47,6 +47,46 @@ fm_path_age() {
   echo $(( $(date +%s) - m ))
 }
 
+fm_watcher_beat_value() {  # <beat-path> <key>
+  local beat=$1 key=$2
+  awk -F= -v k="$key" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$beat" 2>/dev/null
+}
+
+fm_watcher_beat_write() {  # <beat-path> <pid> <watcher-path> <fm-home>
+  local beat=$1 pid=$2 watcher_path=$3 fm_home=$4 ident tmp now
+  ident=$(fm_pid_identity "$pid") || return 1
+  tmp=$(mktemp "${beat}.tmp.XXXXXX") || return 1
+  now=$(date +%s)
+  {
+    printf 'pid=%s\n' "$pid"
+    printf 'pid-identity=%s\n' "$ident"
+    printf 'watcher-path=%s\n' "$watcher_path"
+    printf 'fm-home=%s\n' "$fm_home"
+    printf 'beat-epoch=%s\n' "$now"
+  } > "$tmp" || {
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  }
+  mv -f "$tmp" "$beat" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  }
+}
+
+fm_watcher_beat_matches_pid() {  # <beat-path> <pid> <watcher-path> <fm-home>
+  local beat=$1 pid=$2 watcher_path=$3 fm_home=$4 beat_pid beat_ident beat_path beat_home current_ident
+  [ -s "$beat" ] || return 1
+  beat_pid=$(fm_watcher_beat_value "$beat" pid)
+  beat_ident=$(fm_watcher_beat_value "$beat" 'pid-identity')
+  beat_path=$(fm_watcher_beat_value "$beat" 'watcher-path')
+  beat_home=$(fm_watcher_beat_value "$beat" 'fm-home')
+  [ "$beat_pid" = "$pid" ] || return 1
+  [ "$beat_path" = "$watcher_path" ] || return 1
+  [ "$beat_home" = "$fm_home" ] || return 1
+  current_ident=$(fm_pid_identity "$pid") || return 1
+  [ "$beat_ident" = "$current_ident" ]
+}
+
 fm_lock_clean_known_files() {
   local lockdir=$1
   rm -f \
