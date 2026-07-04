@@ -12,6 +12,7 @@ WATCH="$ROOT/bin/fm-watch.sh"
 WATCH_ARM="$ROOT/bin/fm-watch-arm.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
 LIB="$ROOT/bin/fm-wake-lib.sh"
+WAKE_EXIT_STATUS=10
 
 TMP_ROOT=$(fm_test_tmproot fm-watcher-lock-tests)
 
@@ -552,12 +553,42 @@ SH
   chmod +x "$check_file"
   rc=0
   PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=0 FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 "$WATCH_ARM" > "$armout" || rc=$?
-  [ "$rc" -eq 0 ] || fail "arm returned non-zero for an immediate wake (status $rc): $(cat "$armout")"
+  [ "$rc" -eq "$WAKE_EXIT_STATUS" ] || fail "arm did not use the dedicated wake exit status for an immediate wake (got $rc): $(cat "$armout")"
   grep -F "check: $check_file: merged: https://example.test/pr/7" "$armout" >/dev/null || fail "arm did not propagate the immediate check wake"
   ! grep -qF 'watcher: FAILED' "$armout" || fail "arm printed FAILED after a valid immediate wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after immediate arm wake failed"
   grep "$(printf '\tcheck\t')" "$drain_out" | grep -F "$check_file" | grep -F 'merged: https://example.test/pr/7' >/dev/null || fail "immediate arm wake was not queued"
-  pass "arm propagates an immediate watcher wake before confirmation"
+  pass "arm propagates an immediate watcher wake before confirmation and exits with the wake status"
+}
+
+test_arm_surfaces_delayed_signal_wake_with_nonzero_exit() {
+  local dir state fakebin armout drain_out status_file armpid rc i
+  dir=$(make_case arm-delayed-signal-wake)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  drain_out="$dir/drain.out"
+  status_file="$state/task.status"
+
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH_ARM" > "$armout" &
+  armpid=$!
+
+  i=0
+  while [ "$i" -lt 60 ]; do
+    grep -qF 'watcher: started pid=' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout" || fail "arm did not confirm a started watcher before the delayed wake"
+
+  printf 'done: PR https://example.test/pr/8\n' > "$status_file"
+  wait_for_exit "$armpid" 80
+  rc=$?
+  [ "$rc" -eq "$WAKE_EXIT_STATUS" ] || fail "arm did not use the dedicated wake exit status for a delayed signal wake (got $rc): $(cat "$armout")"
+  grep -F "signal: $status_file" "$armout" >/dev/null || fail "arm did not propagate the delayed signal wake"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after delayed signal wake failed"
+  grep "$(printf '\tsignal\t')" "$drain_out" | grep -F "$status_file" >/dev/null || fail "delayed signal wake was not queued"
+  pass "arm surfaces a delayed signal wake with the dedicated wake exit status"
 }
 
 test_arm_waits_for_peer_beacon_after_child_stands_down() {
@@ -637,5 +668,6 @@ test_arm_reports_healthy_for_live_fresh_watcher
 test_arm_starts_and_self_heals
 test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
+test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_fails_loud_when_no_fresh_watcher_confirmable
