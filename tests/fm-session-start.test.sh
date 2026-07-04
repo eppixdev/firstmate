@@ -144,6 +144,49 @@ SH
   chmod +x "$fakebin/ps"
 }
 
+make_fake_ps_shell_wrapper_false_positive() {
+  local fakebin=$1
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+pid=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-p" ]; then
+    pid=$arg
+  fi
+  prev=$arg
+done
+case "$*" in
+  *"-o comm="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' 'zsh' ;;
+      *) printf '%s\n' 'zsh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o args="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' '/usr/bin/zsh -lc codex exec "something unrelated"' ;;
+      *) printf '%s\n' '/usr/bin/zsh -c bin/fm-session-start.sh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o ppid="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' '0' ;;
+      *) printf '%s\n' '1' ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 1
+SH
+  chmod +x "$fakebin/ps"
+}
+
 # make_fake_tmux <fakebin> <live-target>: display-message succeeds only for
 # the given "session:window" target - the exact primitive
 # fm_backend_target_exists uses for a tmux endpoint liveness read.
@@ -245,6 +288,24 @@ EOF
   assert_not_contains "$out" "READ-ONLY SESSION" "wrapped Codex harness incorrectly forced the session into read-only mode"
 
   pass "lock acquisition accepts wrapped Codex ancestry when the harness name appears only in argv"
+}
+
+test_lock_rejects_shell_ancestor_that_only_mentions_harness_in_args() {
+  local rec root home fakebin out
+  rec=$(new_world shell-wrapper-lock)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_shell_wrapper_false_positive "$fakebin"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH" 2>&1)
+
+  assert_contains "$out" "cannot locate harness process in ancestry" "shell wrapper false positive was not rejected as a missing harness"
+  assert_not_contains "$out" "lock acquired: harness pid" "shell wrapper false positive still acquired the lock"
+  assert_contains "$out" "READ-ONLY SESSION" "shell wrapper false positive did not fall back to the read-only session path"
+
+  pass "lock acquisition rejects shell ancestors that only mention a harness name in argv"
 }
 
 # --- lock refusal: read-only path --------------------------------------------
@@ -541,6 +602,7 @@ EOF
 
 test_context_digest_absent_empty_present
 test_lock_acquires_when_harness_is_only_visible_in_wrapped_args
+test_lock_rejects_shell_ancestor_that_only_mentions_harness_in_args
 test_lock_refusal_read_only_path
 test_output_ordering_diagnostics_lead
 test_status_tail_bounding

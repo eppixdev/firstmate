@@ -414,8 +414,7 @@ while :; do
 
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
-  fm_watcher_beat_write "$STATE/.last-watcher-beat" "$WATCHER_PID" "$WATCH_PATH" "$FM_HOME" \
-    || touch "$STATE/.last-watcher-beat"
+  fm_watcher_beat_write "$STATE/.last-watcher-beat" "$WATCHER_PID" "$WATCH_PATH" "$FM_HOME" || true
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.

@@ -17,17 +17,27 @@ mkdir -p "$STATE"
 # Known harness command names; extend when a new adapter is verified.
 HARNESS_RE='claude|codex|opencode|grok|^pi$'
 
+process_is_harness() {
+  local comm=$1 args=$2 base
+  base=$(basename "$comm")
+  if printf '%s' "$base" | grep -qE "$HARNESS_RE"; then
+    return 0
+  fi
+  case "$base" in
+    bwrap|node|nodejs|python|python[0-9]*)
+      printf '%s' "$args" | grep -qE "$HARNESS_RE"
+      return
+      ;;
+  esac
+  return 1
+}
+
 harness_pid() {
   local pid=$$ comm args
   for _ in 1 2 3 4 5 6 7 8; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
     args=$(ps -o args= -p "$pid" 2>/dev/null)
-    if printf '%s' "$(basename "$comm")" | grep -qE "$HARNESS_RE"; then
-      echo "$pid"; return 0
-    fi
-    # Wrapped harnesses can appear under a generic binary such as bwrap,
-    # node, or python while still exposing the harness in argv.
-    printf '%s' "$args" | grep -qE "$HARNESS_RE" && { echo "$pid"; return 0; }
+    process_is_harness "$comm" "$args" && { echo "$pid"; return 0; }
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
     [ -n "$pid" ] && [ "$pid" -gt 0 ] || return 1
   done
@@ -35,10 +45,11 @@ harness_pid() {
 }
 
 holder_alive() {  # true if $1 is a live process that looks like a harness
-  local pid=$1 comm
+  local pid=$1 comm args
   kill -0 "$pid" 2>/dev/null || return 1
   comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  printf '%s' "$(basename "$comm") $(ps -o args= -p "$pid" 2>/dev/null)" | grep -qE "$HARNESS_RE"
+  args=$(ps -o args= -p "$pid" 2>/dev/null)
+  process_is_harness "$comm" "$args"
 }
 
 if [ "${1:-}" = "status" ]; then

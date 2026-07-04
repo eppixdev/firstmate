@@ -679,6 +679,38 @@ test_arm_rejects_leftover_fresh_beacon_until_child_owns_it() {
   pass "arm refuses a leftover fresh beacon until the child watcher writes its own owned beat"
 }
 
+test_arm_does_not_refresh_beacon_when_owned_write_fails() {
+  local dir state fakebin armout before after status
+  dir=$(make_case arm-beat-write-failure)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  cat > "$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$fakebin/mv"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+  if [ "$(uname)" = Darwin ]; then
+    before=$(stat -f %m "$state/.last-watcher-beat")
+  else
+    before=$(stat -c %Y "$state/.last-watcher-beat")
+  fi
+  status=0
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_ARM_CONFIRM_TIMEOUT=1 "$WATCH_ARM" > "$armout" || status=$?
+  [ "$status" -ne 0 ] || fail "arm exited zero even though every owned beacon write failed"
+  grep -F 'watcher: FAILED - no live watcher with a fresh beacon' "$armout" >/dev/null \
+    || fail "arm did not fail loudly when owned beacon writes failed"
+  if [ "$(uname)" = Darwin ]; then
+    after=$(stat -f %m "$state/.last-watcher-beat")
+  else
+    after=$(stat -c %Y "$state/.last-watcher-beat")
+  fi
+  [ "$after" = "$before" ] || fail "failed owned beacon writes still refreshed the beacon mtime"
+  pass "arm leaves the beacon stale when owned beacon writes fail"
+}
+
 test_arm_fails_loud_when_no_fresh_watcher_confirmable() {
   local dir state fakebin armout live armpid status
   dir=$(make_case arm-failed-stale)
@@ -730,4 +762,5 @@ test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_rejects_leftover_fresh_beacon_until_child_owns_it
+test_arm_does_not_refresh_beacon_when_owned_write_fails
 test_arm_fails_loud_when_no_fresh_watcher_confirmable
