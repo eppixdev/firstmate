@@ -25,8 +25,12 @@
 # stale-beacon or dead-pid holder either self-heals (the fresh child steals the
 # dead lock per the singleton self-eviction/steal path and is confirmed) or this
 # returns the FAILED line. On started/healthy it exits zero; on FAILED it exits
-# non-zero so the failure is loud and a caller can react. A healthy line means a
-# live cycle already exists; do not churn extra no-op arms until that cycle fires.
+# non-zero so the failure is loud and a caller can react. When an actionable wake
+# fires, it exits with a dedicated non-zero status after printing the wake reason:
+# background-task harnesses that only surface non-zero completions must treat a
+# wake as noteworthy, or the queue fills while supervision silently goes stale.
+# A healthy line means a live cycle already exists; do not churn extra no-op arms
+# until that cycle fires.
 #
 # --restart: stop ONLY this FM_HOME's watcher (the pid recorded in THIS home's
 # state/.watch.lock) and start a fresh one. It resolves and signals exactly that
@@ -46,6 +50,7 @@ BEAT="$STATE/.last-watcher-beat"
 GRACE=${FM_GUARD_GRACE:-300}
 # How long to wait for a freshly forked watcher to acquire the lock and beat.
 CONFIRM_TIMEOUT=${FM_ARM_CONFIRM_TIMEOUT:-10}
+WAKE_EXIT_STATUS=${FM_WATCH_WAKE_EXIT_STATUS:-10}
 
 watch_lock_matches_pid() {
   local pid=$1 lock_home lock_path lock_identity current_identity
@@ -102,6 +107,13 @@ watch_output_has_wake() {
 print_watch_output() {
   local out=$1
   [ -s "$out" ] && cat "$out"
+}
+
+exit_with_wake() {
+  local out=$1
+  print_watch_output "$out"
+  rm -f "$out" 2>/dev/null || true
+  exit "$WAKE_EXIT_STATUS"
 }
 
 mode=arm
@@ -174,6 +186,9 @@ while :; do
       echo "watcher: started pid=$child (beacon fresh)"
       wait "$child"
       rc=$?
+      if [ "$rc" -eq 0 ] && watch_output_has_wake "$child_out"; then
+        exit_with_wake "$child_out"
+      fi
       print_watch_output "$child_out"
       rm -f "$child_out" 2>/dev/null || true
       exit "$rc"
@@ -189,9 +204,7 @@ while :; do
     rc=$?
     child_done=1
     if [ "$rc" -eq 0 ] && watch_output_has_wake "$child_out"; then
-      print_watch_output "$child_out"
-      rm -f "$child_out" 2>/dev/null || true
-      exit 0
+      exit_with_wake "$child_out"
     fi
   fi
   [ "$(date +%s)" -ge "$deadline" ] && break
