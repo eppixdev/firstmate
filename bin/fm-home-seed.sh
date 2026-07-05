@@ -778,7 +778,10 @@ initialize_no_mistakes_project() {
     echo "error: no-mistakes command not found; cannot initialize $project in $home" >&2
     return 1
   }
-  ( cd "$dst" && no-mistakes init && no-mistakes doctor ) || {
+  ( cd "$dst" \
+      && no-mistakes init \
+      && no-mistakes doctor \
+      && "$FM_ROOT/bin/fm-no-mistakes-default-branch.sh" . >/dev/null ) || {
     echo "error: failed to initialize no-mistakes for $project at $dst" >&2
     return 1
   }
