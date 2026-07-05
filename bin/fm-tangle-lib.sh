@@ -21,7 +21,7 @@
 # then fall back to local or remote branch evidence when there is a single
 # unambiguous candidate. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch locals remotes candidate
+  local dir=$1 ref branch locals remotes candidate candidate_count other ok
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
@@ -39,6 +39,37 @@ fm_default_branch() {
   fi
   if [ "$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
     candidate=$(printf '%s\n' "$remotes" | sed -n '/./{s#^origin/##;p;q;}')
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate=
+  candidate_count=0
+  while IFS= read -r branch; do
+    [ -n "$branch" ] || continue
+    git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" || continue
+    ok=1
+    while IFS= read -r other; do
+      [ -n "$other" ] || continue
+      [ "$other" = "$branch" ] && continue
+      git -C "$dir" merge-base --is-ancestor "refs/remotes/origin/$branch" "refs/remotes/origin/$other" \
+        >/dev/null 2>&1 || {
+        ok=0
+        break
+      }
+    done <<EOF
+$(
+  printf '%s\n' "$remotes" | sed -n 's#^origin/##p'
+)
+EOF
+    [ "$ok" = 1 ] || continue
+    candidate=$branch
+    candidate_count=$((candidate_count + 1))
+  done <<EOF
+$(
+  printf '%s\n' "$remotes" | sed -n 's#^origin/##p'
+)
+EOF
+  if [ "$candidate_count" = "1" ]; then
     printf '%s\n' "$candidate"
     return 0
   fi

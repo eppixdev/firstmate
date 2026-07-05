@@ -143,6 +143,30 @@ test_prefers_single_remote_branch_over_local_main_fallback() {
   pass "fm-no-mistakes-default-branch prefers remote branch evidence over local main"
 }
 
+test_uses_ancestor_branch_when_origin_head_is_missing() {
+  local repo origin gate out expected
+  repo="$TMP_ROOT/repo-develop-and-topic"
+  origin="$TMP_ROOT/origin-develop-and-topic.git"
+  gate="$TMP_ROOT/gate-develop-and-topic.git"
+  make_repo_with_origin "$repo" "$origin" develop
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  git -C "$repo" checkout -q -b topic
+  printf 'topic\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam topic
+  git -C "$repo" push -u origin topic >/dev/null
+  git -C "$repo" checkout -q develop
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed without origin/HEAD"
+  expected=$(git -C "$repo" rev-parse origin/develop)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/develop)" = "$expected" ] \
+    || fail "repair did not choose the ancestor default branch when origin/HEAD was missing"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror develop, origin/develop, and HEAD" \
+    "repair did not report the ancestor-branch self-heal"
+  pass "fm-no-mistakes-default-branch infers develop from remote branch ancestry"
+}
+
 test_resolves_relative_gate_paths_from_repo_root() {
   local fixture repo origin gate out expected
   fixture="$TMP_ROOT/relative-gate-fixture"
@@ -163,10 +187,33 @@ test_resolves_relative_gate_paths_from_repo_root() {
   pass "fm-no-mistakes-default-branch resolves relative gate paths from the repo root"
 }
 
+test_resolves_relative_gate_paths_from_subdirectories() {
+  local fixture repo origin gate out expected
+  fixture="$TMP_ROOT/relative-gate-subdir-fixture"
+  repo="$fixture/repo"
+  origin="$fixture/origin.git"
+  gate="$fixture/gate.git"
+  mkdir -p "$fixture"
+  make_repo_with_origin "$repo" "$origin"
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes ../gate.git
+  mkdir -p "$repo/sub/dir"
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo/sub/dir") || fail "default-branch repair failed from a subdirectory"
+  expected=$(git -C "$repo" rev-parse origin/main)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "repair did not seed refs/heads/main from a subdirectory invocation"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror main, origin/main, and HEAD" \
+    "repair did not report the subdirectory relative-path self-heal"
+  pass "fm-no-mistakes-default-branch resolves relative gate paths from subdirectories"
+}
+
 test_repairs_missing_gate_refs
 test_noop_when_gate_is_current
 test_repairs_head_when_refs_are_already_seeded
 test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
 test_prefers_single_remote_branch_over_local_main_fallback
+test_uses_ancestor_branch_when_origin_head_is_missing
 test_resolves_relative_gate_paths_from_repo_root
+test_resolves_relative_gate_paths_from_subdirectories
