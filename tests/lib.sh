@@ -41,6 +41,10 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "$2"
+}
+
 # --- self-cleaning temp root ------------------------------------------------
 #
 # fm_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal
