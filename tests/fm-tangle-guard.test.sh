@@ -119,6 +119,40 @@ test_lib_fails_closed_for_ancestry_only_remote_default() {
   pass "fm_default_branch fails closed when only ancestry suggests a default"
 }
 
+test_lib_fails_closed_for_lone_local_tracking_branch() {
+  local repo origin peer out
+  repo="$TMP_ROOT/lib-lone-local-tracking-repo"
+  origin="$TMP_ROOT/lib-lone-local-tracking-origin.git"
+  peer="$TMP_ROOT/lib-lone-local-tracking-peer"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'main\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin main >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/main
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  git -C "$peer" checkout -q -b topic
+  printf 'topic\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam topic
+  git -C "$peer" push -u origin topic >/dev/null
+  git -C "$repo" fetch -q origin topic
+  git -C "$repo" checkout -q --detach
+  git -C "$repo" checkout -q -b topic origin/topic
+  git -C "$repo" branch -D main >/dev/null
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "lone local tracking branch origin/HEAD-missing repo should fail closed, got '$out'"
+  pass "fm_default_branch fails closed when only a local topic branch tracks origin"
+}
+
 # --- GUARD 2a: fm-guard banner ----------------------------------------------
 
 run_guard() {
@@ -276,6 +310,7 @@ test_spawn_isolation_abort() {
 test_lib_classification
 test_lib_fails_closed_for_ambiguous_remote_default
 test_lib_fails_closed_for_ancestry_only_remote_default
+test_lib_fails_closed_for_lone_local_tracking_branch
 test_guard_banner
 test_bootstrap_line
 test_brief_assertion_precedes_branch

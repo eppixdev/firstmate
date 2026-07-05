@@ -21,8 +21,8 @@
 # then fall back to local or remote branch evidence when there is a single
 # unambiguous candidate. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch locals remotes candidate candidate_count
-  local local_count remote_count upstream_remote upstream_merge
+  local dir=$1 ref branch locals remotes candidate
+  local local_count remote_count
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
@@ -49,24 +49,6 @@ fm_default_branch() {
   fi
   if [ "$remote_count" = "1" ]; then
     candidate=$(printf '%s\n' "$remotes" | sed -n '/./{s#^origin/##;p;q;}')
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  candidate=
-  candidate_count=0
-  while IFS= read -r branch; do
-    [ -n "$branch" ] || continue
-    git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" || continue
-    upstream_remote=$(git -C "$dir" config --get "branch.$branch.remote" 2>/dev/null || true)
-    upstream_merge=$(git -C "$dir" config --get "branch.$branch.merge" 2>/dev/null || true)
-    [ "$upstream_remote" = "origin" ] || continue
-    [ "$upstream_merge" = "refs/heads/$branch" ] || continue
-    candidate=$branch
-    candidate_count=$((candidate_count + 1))
-  done <<EOF
-$locals
-EOF
-  if [ "$candidate_count" = "1" ]; then
     printf '%s\n' "$candidate"
     return 0
   fi
