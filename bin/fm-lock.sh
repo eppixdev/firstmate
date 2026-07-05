@@ -23,6 +23,14 @@ harness_token_is_verified() {
   return 1
 }
 
+args_command_base() {
+  local args=$1
+  local -a argv=()
+  read -r -a argv <<< "$args"
+  [ "${#argv[@]}" -gt 0 ] || return 1
+  basename -- "${argv[0]}"
+}
+
 wrapped_harness_token() {
   local base=$1 args=$2
   local -a argv=()
@@ -95,8 +103,16 @@ process_is_harness() {
   local comm=$1 args=$2 base token
   base=$(basename -- "$comm")
   harness_token_is_verified "$base" && return 0
-  token=$(wrapped_harness_token "$base" "$args") || return 1
-  harness_token_is_verified "$token"
+  if token=$(wrapped_harness_token "$base" "$args"); then
+    harness_token_is_verified "$token" && return 0
+  fi
+
+  base=$(args_command_base "$args") || return 1
+  harness_token_is_verified "$base" && return 0
+  if token=$(wrapped_harness_token "$base" "$args"); then
+    harness_token_is_verified "$token" && return 0
+  fi
+  return 1
 }
 
 harness_pid() {

@@ -144,6 +144,49 @@ SH
   chmod +x "$fakebin/ps"
 }
 
+make_fake_ps_wrapped_codex_comm_from_argv0() {
+  local fakebin=$1
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+pid=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-p" ]; then
+    pid=$arg
+  fi
+  prev=$arg
+done
+case "$*" in
+  *"-o comm="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' '3' ;;
+      *) printf '%s\n' 'zsh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o args="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' 'bwrap --new-session --argv0 codex-linux-sandbox -- /home/ch/.codex/bin/codex --sandbox-policy-cwd /home/ch/firstmate --command-cwd /home/ch/firstmate -- /usr/bin/zsh -c bin/fm-session-start.sh' ;;
+      *) printf '%s\n' '/usr/bin/zsh -c bin/fm-session-start.sh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o ppid="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' '0' ;;
+      *) printf '%s\n' '1' ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 1
+SH
+  chmod +x "$fakebin/ps"
+}
+
 make_fake_ps_shell_wrapper_false_positive() {
   local fakebin=$1
   cat > "$fakebin/ps" <<'SH'
@@ -374,6 +417,24 @@ EOF
   assert_not_contains "$out" "READ-ONLY SESSION" "wrapped Codex harness incorrectly forced the session into read-only mode"
 
   pass "lock acquisition accepts wrapped Codex ancestry when the harness name appears only in argv"
+}
+
+test_lock_acquires_when_comm_is_unhelpful_but_argv_still_names_bwrap() {
+  local rec root home fakebin out
+  rec=$(new_world wrapped-codex-argv0-comm)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_wrapped_codex_comm_from_argv0 "$fakebin"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+
+  assert_contains "$out" "lock acquired: harness pid" "lock acquisition did not recover when comm was opaque but argv still named the bwrap wrapper"
+  assert_not_contains "$out" "cannot locate harness process in ancestry" "opaque comm still caused wrapped Codex ancestry to be rejected"
+  assert_not_contains "$out" "READ-ONLY SESSION" "opaque comm incorrectly forced the session into read-only mode"
+
+  pass "lock acquisition accepts wrapped Codex ancestry when comm is opaque but argv identifies the wrapper"
 }
 
 test_lock_rejects_shell_ancestor_that_only_mentions_harness_in_args() {
