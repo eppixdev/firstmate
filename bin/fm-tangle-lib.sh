@@ -18,9 +18,10 @@
 # primary checkout is the alarm.
 
 # Resolve the default branch name of the git repo at <dir>: prefer origin/HEAD,
-# then fall back to a local main/master. Echoes the name, or returns 1.
+# then fall back to local or remote branch evidence when there is a single
+# unambiguous candidate. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch
+  local dir=$1 ref branch locals remotes candidate
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
@@ -32,6 +33,21 @@ fm_default_branch() {
       return 0
     fi
   done
+  locals=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads)
+  remotes=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/origin \
+    | grep -v '^origin/HEAD$' || true)
+  if [ "$(printf '%s\n' "$locals" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
+    candidate=$(printf '%s\n' "$locals" | sed -n '/./{p;q;}')
+    if git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+  if [ "$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
+    candidate=$(printf '%s\n' "$remotes" | sed -n '/./{s#^origin/##;p;q;}')
+    printf '%s\n' "$candidate"
+    return 0
+  fi
   return 1
 }
 

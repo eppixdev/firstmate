@@ -29,7 +29,7 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { echo "error: $REPO is not a git work tree" >&2; exit 1; }
 
 DEFAULT=$(fm_default_branch "$REPO") \
-  || { echo "error: cannot determine default branch for $REPO; expected origin/HEAD, main, or master" >&2; exit 1; }
+  || { echo "error: cannot determine default branch for $REPO; expected origin/HEAD or a single matching local/origin branch" >&2; exit 1; }
 
 SOURCE_REF=
 for candidate in "refs/remotes/origin/$DEFAULT" "refs/heads/$DEFAULT"; do
@@ -55,15 +55,19 @@ git --git-dir="$GATE_DIR" rev-parse --is-bare-repository >/dev/null 2>&1 \
 TARGET_SHA=$(git -C "$REPO" rev-parse "$SOURCE_REF^{commit}")
 HEAD_REF="refs/heads/$DEFAULT"
 REMOTE_REF="refs/remotes/origin/$DEFAULT"
+HEAD_SYMREF=$(git --git-dir="$GATE_DIR" symbolic-ref --quiet HEAD 2>/dev/null || true)
 HEAD_SHA=$(git --git-dir="$GATE_DIR" rev-parse --verify --quiet "$HEAD_REF^{commit}" 2>/dev/null || true)
 REMOTE_SHA=$(git --git-dir="$GATE_DIR" rev-parse --verify --quiet "$REMOTE_REF^{commit}" 2>/dev/null || true)
 
-if [ "$HEAD_SHA" = "$TARGET_SHA" ] && [ "$REMOTE_SHA" = "$TARGET_SHA" ]; then
+if [ "$HEAD_SHA" = "$TARGET_SHA" ] \
+  && [ "$REMOTE_SHA" = "$TARGET_SHA" ] \
+  && [ "$HEAD_SYMREF" = "$HEAD_REF" ]; then
   printf 'ok: no-mistakes gate mirror has %s at %s from %s\n' "$DEFAULT" "$TARGET_SHA" "$SOURCE_REF"
   exit 0
 fi
 
 git --git-dir="$GATE_DIR" fetch --quiet "$REPO" "$SOURCE_REF:$HEAD_REF"
 git --git-dir="$GATE_DIR" update-ref "$REMOTE_REF" "$TARGET_SHA"
-printf 'healed: seeded no-mistakes gate mirror %s and origin/%s at %s from %s\n' \
+git --git-dir="$GATE_DIR" symbolic-ref HEAD "$HEAD_REF"
+printf 'healed: seeded no-mistakes gate mirror %s, origin/%s, and HEAD at %s from %s\n' \
   "$DEFAULT" "$DEFAULT" "$TARGET_SHA" "$SOURCE_REF"
