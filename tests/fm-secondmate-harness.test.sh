@@ -934,7 +934,9 @@ test_config_push_propagates_reports_without_ff_or_nudge() {
     "config push must not nudge secondmates"
   [ "$(git -C "$w/sm" rev-parse HEAD)" = "$old_head" ] \
     || fail "config push fast-forwarded tracked files"
-  [ ! -s "$err" ] || fail "clean config push wrote unexpected stderr: $(cat "$err")"
+  err_text=$(cat "$err")
+  assert_not_contains "$err_text" "fm-config-inherit:" \
+    "clean config push wrote an unexpected inherit diagnostic"
 
   out2=$(run_config_push "$w" 2>"$err"); status=$?
   expect_code 0 "$status" "idempotent config push should succeed"

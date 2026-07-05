@@ -14,6 +14,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+require_command jq "jq is required for x-mode tests"
 # The client under test uses the real jq; make it resolvable regardless of where
 # it is installed (Homebrew, Nix profile bins, etc.), which the bare BASE_PATH may
 # not include. Prepended after the fakebin so the fake curl still wins.

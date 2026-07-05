@@ -95,14 +95,15 @@ test_live_stale_watch_lock_is_actionable() {
 }
 
 test_guard_warnings() {
-  # The guard's two operator-visible states, with resilient substrings instead of
-  # four copy-coupled tests:
+  # The guard's three operator-visible states, with resilient substrings instead
+  # of copy-coupled tests:
   #   (1) watcher DOWN + queued wakes: a prominent no-watcher banner leads (alarm
   #       title, in-flight count, beacon age, fix command), the queued-wakes
   #       warning follows it, and the guidance is re-arm-after-drain (never the
   #       old conflicting "restart NOW first").
-  #   (2) a fresh watcher and an empty queue: total silence.
-  local dir state err first banner_line queue_line
+  #   (2) an OWNED fresh watcher and an empty queue: total silence.
+  #   (3) an anonymous fresh beat file alone is NOT healthy.
+  local dir state err first banner_line queue_line live_pid identity
   dir=$(make_case guard)
   state="$dir/state"
   err="$dir/guard.err"
@@ -130,17 +131,37 @@ test_guard_warnings() {
   queue_line=$(grep -n 'queued wakes pending - drain them' "$err" | head -1 | cut -d: -f1)
   [ "$banner_line" -lt "$queue_line" ] || fail "queued-wakes warning printed before the no-watcher banner"
 
-  # (2) fresh watcher, empty queue -> silence.
+  # (2) owned fresh watcher, empty queue -> silence.
   dir=$(make_case guard-fresh)
   state="$dir/state"
   err="$dir/guard.err"
+  sleep 300 &
+  live_pid=$!
   printf 'project=x\n' > "$state/task.meta"
-  touch "$state/.last-watcher-beat"
+  mkdir "$state/.watch.lock"
+  printf '%s\n' "$live_pid" > "$state/.watch.lock/pid"
+  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live_pid") || fail "could not identify fresh guard watcher pid"
+  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
+  FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_watcher_beat_write "$2" "$3" "$4" "$5"' \
+    _ "$LIB" "$state/.last-watcher-beat" "$live_pid" "$WATCH" "$dir" || fail "could not write owned fresh guard beat"
   # Non-git FM_ROOT keeps the worktree-tangle check inert so "fresh watcher ->
   # total silence" stays a pure assertion about watcher state.
   FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed"
   [ ! -s "$err" ] || fail "guard warned with a fresh watcher and no queued wakes: $(cat "$err")"
-  pass "guard banner leads when down with pending wakes (re-arm-after-drain) and stays silent when fresh"
+  kill "$live_pid" 2>/dev/null || true
+  wait "$live_pid" 2>/dev/null || true
+
+  # (3) anonymous fresh beat -> still alarm.
+  dir=$(make_case guard-anonymous-fresh)
+  state="$dir/state"
+  err="$dir/guard.err"
+  printf 'project=x\n' > "$state/task.meta"
+  touch "$state/.last-watcher-beat"
+  FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed on anonymous fresh beat"
+  grep -F 'WATCHER DOWN - SUPERVISION IS OFF' "$err" >/dev/null || fail "guard treated an anonymous fresh beat as healthy"
+  pass "guard banner leads when down with pending wakes, stays silent only for an owned fresh watcher, and alarms on an anonymous fresh beat"
 }
 
 test_lock_single_winner_under_concurrency() {
@@ -646,7 +667,8 @@ test_arm_waits_for_peer_beacon_after_child_stands_down() {
   printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
   (
     sleep 1
-    touch "$state/.last-watcher-beat"
+    FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_watcher_beat_write "$2" "$3" "$4" "$5"' \
+      _ "$LIB" "$state/.last-watcher-beat" "$peer" "$WATCH" "$dir"
   ) &
   beater=$!
   status=0
@@ -658,6 +680,86 @@ test_arm_waits_for_peer_beacon_after_child_stands_down() {
   kill "$peer" 2>/dev/null || true
   wait "$peer" 2>/dev/null || true
   pass "arm waits for a peer watcher beacon after child stands down"
+}
+
+test_arm_accepts_equivalent_home_aliases() {
+  local dir state fakebin out armout alias i wpid
+  dir=$(make_case arm-home-alias)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  armout="$dir/arm.out"
+  alias="$TMP_ROOT/arm-home-alias-link"
+  rm -f "$alias"
+  ln -s "$dir" "$alias" || fail "could not create FM_HOME alias symlink"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  wpid=$!
+  i=0
+  while [ "$i" -lt 60 ]; do
+    [ "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" = "$wpid" ] && [ -s "$state/.last-watcher-beat" ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" = "$wpid" ] || fail "seed watcher did not take the lock under its canonical home"
+
+  PATH="$fakebin:$PATH" FM_HOME="$alias/." FM_STATE_OVERRIDE="$state" "$WATCH_ARM" > "$armout" || fail "arm did not accept an equivalent FM_HOME alias"
+  grep -F "watcher: healthy pid=$wpid" "$armout" >/dev/null || fail "arm did not treat an equivalent FM_HOME alias as the same watcher home"
+
+  kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true
+  rm -f "$alias"
+  pass "arm accepts equivalent FM_HOME aliases when comparing watcher ownership"
+}
+
+test_arm_rejects_leftover_fresh_beacon_until_child_owns_it() {
+  local dir state fakebin armout status
+  dir=$(make_case arm-leftover-fresh-beat)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  touch "$state/.last-watcher-beat"
+  status=0
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_WATCH_PRE_BEAT_DELAY=2 FM_ARM_CONFIRM_TIMEOUT=1 "$WATCH_ARM" > "$armout" || status=$?
+  [ "$status" -ne 0 ] || fail "arm exited zero off a leftover fresh beacon before the child wrote its own beat"
+  grep -F 'watcher: FAILED - no live watcher with a fresh beacon' "$armout" >/dev/null \
+    || fail "arm did not fail loudly when only a leftover fresh beacon existed"
+  ! grep -qF 'watcher: started' "$armout" || fail "arm reported started off a leftover fresh beacon"
+  ! grep -qF 'watcher: healthy' "$armout" || fail "arm reported healthy off a leftover fresh beacon"
+  pass "arm refuses a leftover fresh beacon until the child watcher writes its own owned beat"
+}
+
+test_arm_does_not_refresh_beacon_when_owned_write_fails() {
+  local dir state fakebin armout before after status
+  dir=$(make_case arm-beat-write-failure)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  cat > "$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$fakebin/mv"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+  if [ "$(uname)" = Darwin ]; then
+    before=$(stat -f %m "$state/.last-watcher-beat")
+  else
+    before=$(stat -c %Y "$state/.last-watcher-beat")
+  fi
+  status=0
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_ARM_CONFIRM_TIMEOUT=1 "$WATCH_ARM" > "$armout" || status=$?
+  [ "$status" -ne 0 ] || fail "arm exited zero even though every owned beacon write failed"
+  grep -F 'watcher: FAILED - no live watcher with a fresh beacon' "$armout" >/dev/null \
+    || fail "arm did not fail loudly when owned beacon writes failed"
+  if [ "$(uname)" = Darwin ]; then
+    after=$(stat -f %m "$state/.last-watcher-beat")
+  else
+    after=$(stat -c %Y "$state/.last-watcher-beat")
+  fi
+  [ "$after" = "$before" ] || fail "failed owned beacon writes still refreshed the beacon mtime"
+  pass "arm leaves the beacon stale when owned beacon writes fail"
 }
 
 test_arm_fails_loud_when_no_fresh_watcher_confirmable() {
@@ -710,4 +812,7 @@ test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_arm_waits_for_peer_beacon_after_child_stands_down
+test_arm_accepts_equivalent_home_aliases
+test_arm_rejects_leftover_fresh_beacon_until_child_owns_it
+test_arm_does_not_refresh_beacon_when_owned_write_fails
 test_arm_fails_loud_when_no_fresh_watcher_confirmable

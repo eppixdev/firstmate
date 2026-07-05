@@ -15,19 +15,96 @@ LOCK="$STATE/.lock"
 mkdir -p "$STATE"
 
 # Known harness command names; extend when a new adapter is verified.
-HARNESS_RE='claude|codex|opencode|grok|^pi$'
+
+harness_token_is_verified() {
+  case "$(basename -- "$1")" in
+    claude|codex|opencode|grok|pi) return 0 ;;
+  esac
+  return 1
+}
+
+wrapped_harness_token() {
+  local base=$1 args=$2
+  local -a argv=()
+  local i token
+  read -r -a argv <<< "$args"
+  [ "${#argv[@]}" -gt 0 ] || return 1
+  case "$base" in
+    bwrap)
+      for ((i=1; i<${#argv[@]}; i++)); do
+        [ "${argv[$i]}" = "--" ] || continue
+        i=$((i + 1))
+        [ "$i" -lt "${#argv[@]}" ] || return 1
+        printf '%s\n' "${argv[$i]}"
+        return 0
+      done
+      ;;
+    node|nodejs)
+      i=1
+      while [ "$i" -lt "${#argv[@]}" ]; do
+        token=${argv[$i]}
+        case "$token" in
+          -e|-p|--eval|--print) return 1 ;;
+          -r|--require|--loader|--import) i=$((i + 2)); continue ;;
+          --)
+            i=$((i + 1))
+            [ "$i" -lt "${#argv[@]}" ] || return 1
+            printf '%s\n' "${argv[$i]}"
+            return 0
+            ;;
+          -*)
+            i=$((i + 1))
+            continue
+            ;;
+          *)
+            printf '%s\n' "$token"
+            return 0
+            ;;
+        esac
+      done
+      ;;
+    python|python[0-9]*)
+      i=1
+      while [ "$i" -lt "${#argv[@]}" ]; do
+        token=${argv[$i]}
+        case "$token" in
+          -c|-m) return 1 ;;
+          -W|-X) i=$((i + 2)); continue ;;
+          --)
+            i=$((i + 1))
+            [ "$i" -lt "${#argv[@]}" ] || return 1
+            printf '%s\n' "${argv[$i]}"
+            return 0
+            ;;
+          -*)
+            i=$((i + 1))
+            continue
+            ;;
+          *)
+            printf '%s\n' "$token"
+            return 0
+            ;;
+        esac
+      done
+      ;;
+  esac
+  return 1
+}
+
+process_is_harness() {
+  local comm=$1 args=$2 base token
+  base=$(basename -- "$comm")
+  harness_token_is_verified "$base" && return 0
+  token=$(wrapped_harness_token "$base" "$args") || return 1
+  harness_token_is_verified "$token"
+}
 
 harness_pid() {
   local pid=$$ comm args
   for _ in 1 2 3 4 5 6 7 8; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
     args=$(ps -o args= -p "$pid" 2>/dev/null)
-    if printf '%s' "$(basename "$comm")" | grep -qE "$HARNESS_RE"; then
-      echo "$pid"; return 0
-    fi
-    # Wrapped harnesses can appear under a generic binary such as bwrap,
-    # node, or python while still exposing the harness in argv.
-    printf '%s' "$args" | grep -qE "$HARNESS_RE" && { echo "$pid"; return 0; }
+    process_is_harness "$comm" "$args" && { echo "$pid"; return 0; }
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
     [ -n "$pid" ] && [ "$pid" -gt 0 ] || return 1
   done
@@ -35,10 +112,11 @@ harness_pid() {
 }
 
 holder_alive() {  # true if $1 is a live process that looks like a harness
-  local pid=$1 comm
+  local pid=$1 comm args
   kill -0 "$pid" 2>/dev/null || return 1
   comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  printf '%s' "$(basename "$comm") $(ps -o args= -p "$pid" 2>/dev/null)" | grep -qE "$HARNESS_RE"
+  args=$(ps -o args= -p "$pid" 2>/dev/null)
+  process_is_harness "$comm" "$args"
 }
 
 if [ "${1:-}" = "status" ]; then

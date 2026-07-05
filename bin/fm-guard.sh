@@ -6,12 +6,13 @@
 # non-default branch, because that means firstmate-on-itself work landed in the
 # primary instead of an isolated worktree.
 # Then, if any task is in flight (a state/<id>.meta exists) and the watcher's
-# liveness beacon (state/.last-watcher-beat, touched every poll cycle) is
-# missing or older than FM_GUARD_GRACE seconds, prints a loud, clearly delimited
-# banner so the agent cannot skim past it in the tool output of whatever it was
-# doing - the one channel every harness has. Normal wake handling (watcher
-# briefly down between a wake and its re-arm) stays inside the grace window and
-# stays silent. Always exits 0: the guard warns, it never blocks.
+# owned liveness beacon (state/.last-watcher-beat, rewritten every poll cycle
+# with pid/path/home metadata) is missing, stale, or does not belong to the live
+# watcher recorded in this home's lock, prints a loud, clearly delimited banner
+# so the agent cannot skim past it in the tool output of whatever it was doing -
+# the one channel every harness has. Normal wake handling (watcher briefly down
+# between a wake and its re-arm) stays inside the grace window and stays silent.
+# Always exits 0: the guard warns, it never blocks.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +77,8 @@ done
 # Resolve the watcher's liveness from its beacon: fresh within GRACE means a
 # watcher is alive and we stay quiet about it.
 BEAT="$STATE/.last-watcher-beat"
+WATCH_LOCK="$STATE/.watch.lock"
+WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
 watcher_fresh=false
 beacon_desc=never
 if [ -e "$BEAT" ]; then
@@ -83,7 +86,13 @@ if [ -e "$BEAT" ]; then
   if [ -n "$m" ]; then
     age=$(( $(date +%s) - m ))
     beacon_desc="${age}s ago"
-    [ "$age" -lt "$GRACE" ] && watcher_fresh=true
+    lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+    if fm_pid_alive "$lock_pid" \
+      && fm_watcher_lock_matches_pid "$WATCH_LOCK" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+      && fm_watcher_beat_matches_pid "$BEAT" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+      && [ "$age" -lt "$GRACE" ]; then
+      watcher_fresh=true
+    fi
   else
     beacon_desc=unknown
   fi

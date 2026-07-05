@@ -27,6 +27,10 @@
 # bin/fm-watch-arm.sh through the harness's tracked background mechanism. Direct
 # duplicate invocations of this script still no-op through the watcher singleton
 # lock.
+# The liveness beacon is an owned record, not a bare touch: each poll rewrites
+# state/.last-watcher-beat atomically with the watcher's pid, pid-identity,
+# watcher path, FM_HOME, and beat time so guard/arm can reject leftover or
+# mismatched fresh mtimes.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,17 +59,11 @@ mkdir -p "$STATE"
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
 WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-300}}
+PRE_BEAT_DELAY=${FM_WATCH_PRE_BEAT_DELAY:-0}
 
 watch_lock_matches_pid() {
-  local pid=$1 lock_home lock_path lock_identity current_identity
-  lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
-  lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
-  lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
-  [ "$lock_home" = "$FM_HOME" ] || return 1
-  [ "$lock_path" = "$WATCH_PATH" ] || return 1
-  [ -n "$lock_identity" ] || return 1
-  current_identity=$(fm_pid_identity "$pid") || return 1
-  [ "$current_identity" = "$lock_identity" ]
+  local pid=$1
+  fm_watcher_lock_matches_pid "$WATCH_LOCK" "$pid" "$WATCH_PATH" "$FM_HOME"
 }
 
 clear_stale_recorded_watcher_lock() {
@@ -73,8 +71,8 @@ clear_stale_recorded_watcher_lock() {
   lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
   lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
   lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
-  [ "$lock_home" = "$FM_HOME" ] || return 0
-  [ "$lock_path" = "$WATCH_PATH" ] || return 0
+  fm_paths_equivalent "$lock_home" "$FM_HOME" || return 0
+  fm_paths_equivalent "$lock_path" "$WATCH_PATH" || return 0
   [ -n "$lock_identity" ] || return 0
   fm_lock_remove_path "$WATCH_LOCK" || true
 }
@@ -89,8 +87,13 @@ if ! fm_lock_try_acquire "$WATCH_LOCK"; then
   if [ -n "${FM_LOCK_HELD_PID:-}" ]; then
     if [ -e "$BEAT" ]; then
       beat_age=$(fm_path_age "$BEAT")
-      if [ "$beat_age" -ge "$WATCHER_STALE_GRACE" ]; then
-        echo "watcher: lock held by live pid $FM_LOCK_HELD_PID but heartbeat is stale for ${beat_age}s (>${WATCHER_STALE_GRACE}s); inspect or stop that watcher before re-arming." >&2
+      if fm_watcher_beat_matches_pid "$BEAT" "$FM_LOCK_HELD_PID" "$WATCH_PATH" "$FM_HOME"; then
+        if [ "$beat_age" -ge "$WATCHER_STALE_GRACE" ]; then
+          echo "watcher: lock held by live pid $FM_LOCK_HELD_PID but heartbeat is stale for ${beat_age}s (>${WATCHER_STALE_GRACE}s); inspect or stop that watcher before re-arming." >&2
+          exit 1
+        fi
+      elif [ "$beat_age" -ge "$WATCHER_STALE_GRACE" ]; then
+        echo "watcher: lock held by live pid $FM_LOCK_HELD_PID but heartbeat is stale for ${beat_age}s (>${WATCHER_STALE_GRACE}s) and belongs to a different watcher or is unreadable; inspect or stop that watcher before re-arming." >&2
         exit 1
       fi
     elif [ "$(fm_path_age "$WATCH_LOCK")" -ge "$WATCHER_STALE_GRACE" ]; then
@@ -111,6 +114,13 @@ WATCHER_PID=${BASHPID:-$$}
 printf '%s\n' "$FM_HOME" > "$WATCH_LOCK/fm-home" || true
 printf '%s\n' "$WATCH_PATH" > "$WATCH_LOCK/watcher-path" || true
 fm_pid_identity "$WATCHER_PID" > "$WATCH_LOCK/pid-identity" 2>/dev/null || true
+
+# Test hook: widen the arm-vs-first-beat race so the lifecycle tests can prove
+# arm never trusts a leftover fresh beacon from an earlier watcher.
+case "$PRE_BEAT_DELAY" in
+  ''|0|0.0) ;;
+  *) sleep "$PRE_BEAT_DELAY" ;;
+esac
 
 # Portable stat. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`.
 # Do NOT use the `stat -f <fmt> ... || stat -c <fmt> ...` fallback form: on Linux
@@ -401,7 +411,7 @@ while :; do
 
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
-  touch "$STATE/.last-watcher-beat"
+  fm_watcher_beat_write "$STATE/.last-watcher-beat" "$WATCHER_PID" "$WATCH_PATH" "$FM_HOME" || true
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.
