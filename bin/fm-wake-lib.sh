@@ -47,21 +47,45 @@ fm_path_age() {
   echo $(( $(date +%s) - m ))
 }
 
+fm_canon_path() {
+  local path=$1 dir base
+  case "$path" in
+    '') return 1 ;;
+  esac
+  if [ -d "$path" ]; then
+    (cd "$path" 2>/dev/null && pwd -P) || return 1
+    return 0
+  fi
+  dir=$(dirname "$path")
+  base=$(basename "$path")
+  dir=$(cd "$dir" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
+fm_paths_equivalent() {  # <a> <b>
+  local a=$1 b=$2 ca cb
+  ca=$(fm_canon_path "$a" 2>/dev/null) || return 1
+  cb=$(fm_canon_path "$b" 2>/dev/null) || return 1
+  [ "$ca" = "$cb" ]
+}
+
 fm_watcher_beat_value() {  # <beat-path> <key>
   local beat=$1 key=$2
   awk -F= -v k="$key" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$beat" 2>/dev/null
 }
 
 fm_watcher_beat_write() {  # <beat-path> <pid> <watcher-path> <fm-home>
-  local beat=$1 pid=$2 watcher_path=$3 fm_home=$4 ident tmp now
+  local beat=$1 pid=$2 watcher_path=$3 fm_home=$4 ident tmp now canon_watch canon_home
   ident=$(fm_pid_identity "$pid") || return 1
+  canon_watch=$(fm_canon_path "$watcher_path") || return 1
+  canon_home=$(fm_canon_path "$fm_home") || return 1
   tmp=$(mktemp "${beat}.tmp.XXXXXX") || return 1
   now=$(date +%s)
   {
     printf 'pid=%s\n' "$pid"
     printf 'pid-identity=%s\n' "$ident"
-    printf 'watcher-path=%s\n' "$watcher_path"
-    printf 'fm-home=%s\n' "$fm_home"
+    printf 'watcher-path=%s\n' "$canon_watch"
+    printf 'fm-home=%s\n' "$canon_home"
     printf 'beat-epoch=%s\n' "$now"
   } > "$tmp" || {
     rm -f "$tmp" 2>/dev/null || true
@@ -81,10 +105,22 @@ fm_watcher_beat_matches_pid() {  # <beat-path> <pid> <watcher-path> <fm-home>
   beat_path=$(fm_watcher_beat_value "$beat" 'watcher-path')
   beat_home=$(fm_watcher_beat_value "$beat" 'fm-home')
   [ "$beat_pid" = "$pid" ] || return 1
-  [ "$beat_path" = "$watcher_path" ] || return 1
-  [ "$beat_home" = "$fm_home" ] || return 1
+  fm_paths_equivalent "$beat_path" "$watcher_path" || return 1
+  fm_paths_equivalent "$beat_home" "$fm_home" || return 1
   current_ident=$(fm_pid_identity "$pid") || return 1
   [ "$beat_ident" = "$current_ident" ]
+}
+
+fm_watcher_lock_matches_pid() {  # <lockdir> <pid> <watcher-path> <fm-home>
+  local lockdir=$1 pid=$2 watcher_path=$3 fm_home=$4 lock_home lock_path lock_identity current_identity
+  lock_home=$(cat "$lockdir/fm-home" 2>/dev/null || true)
+  lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$lockdir/pid-identity" 2>/dev/null || true)
+  fm_paths_equivalent "$lock_home" "$fm_home" || return 1
+  fm_paths_equivalent "$lock_path" "$watcher_path" || return 1
+  [ -n "$lock_identity" ] || return 1
+  current_identity=$(fm_pid_identity "$pid") || return 1
+  [ "$current_identity" = "$lock_identity" ]
 }
 
 fm_lock_clean_known_files() {

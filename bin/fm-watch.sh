@@ -58,15 +58,8 @@ WATCHER_STALE_GRACE=${FM_WATCHER_STALE_GRACE:-${FM_GUARD_GRACE:-300}}
 PRE_BEAT_DELAY=${FM_WATCH_PRE_BEAT_DELAY:-0}
 
 watch_lock_matches_pid() {
-  local pid=$1 lock_home lock_path lock_identity current_identity
-  lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
-  lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
-  lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
-  [ "$lock_home" = "$FM_HOME" ] || return 1
-  [ "$lock_path" = "$WATCH_PATH" ] || return 1
-  [ -n "$lock_identity" ] || return 1
-  current_identity=$(fm_pid_identity "$pid") || return 1
-  [ "$current_identity" = "$lock_identity" ]
+  local pid=$1
+  fm_watcher_lock_matches_pid "$WATCH_LOCK" "$pid" "$WATCH_PATH" "$FM_HOME"
 }
 
 clear_stale_recorded_watcher_lock() {
@@ -74,8 +67,8 @@ clear_stale_recorded_watcher_lock() {
   lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
   lock_path=$(cat "$WATCH_LOCK/watcher-path" 2>/dev/null || true)
   lock_identity=$(cat "$WATCH_LOCK/pid-identity" 2>/dev/null || true)
-  [ "$lock_home" = "$FM_HOME" ] || return 0
-  [ "$lock_path" = "$WATCH_PATH" ] || return 0
+  fm_paths_equivalent "$lock_home" "$FM_HOME" || return 0
+  fm_paths_equivalent "$lock_path" "$WATCH_PATH" || return 0
   [ -n "$lock_identity" ] || return 0
   fm_lock_remove_path "$WATCH_LOCK" || true
 }

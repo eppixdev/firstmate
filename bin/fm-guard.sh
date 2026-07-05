@@ -76,6 +76,8 @@ done
 # Resolve the watcher's liveness from its beacon: fresh within GRACE means a
 # watcher is alive and we stay quiet about it.
 BEAT="$STATE/.last-watcher-beat"
+WATCH_LOCK="$STATE/.watch.lock"
+WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
 watcher_fresh=false
 beacon_desc=never
 if [ -e "$BEAT" ]; then
@@ -83,7 +85,13 @@ if [ -e "$BEAT" ]; then
   if [ -n "$m" ]; then
     age=$(( $(date +%s) - m ))
     beacon_desc="${age}s ago"
-    [ "$age" -lt "$GRACE" ] && watcher_fresh=true
+    lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+    if fm_pid_alive "$lock_pid" \
+      && fm_watcher_lock_matches_pid "$WATCH_LOCK" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+      && fm_watcher_beat_matches_pid "$BEAT" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+      && [ "$age" -lt "$GRACE" ]; then
+      watcher_fresh=true
+    fi
   else
     beacon_desc=unknown
   fi
