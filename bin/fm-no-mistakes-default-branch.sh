@@ -30,7 +30,7 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
 REPO_ROOT=$(git -C "$REPO" rev-parse --show-toplevel)
 
 DEFAULT=$(fm_default_branch "$REPO") \
-  || { echo "error: cannot determine default branch for $REPO; expected origin/HEAD or unambiguous local/origin branch evidence" >&2; exit 1; }
+  || { echo "error: cannot determine default branch for $REPO; expected origin/HEAD or local-only unambiguous branch evidence" >&2; exit 1; }
 
 SOURCE_REF=
 for candidate in "refs/remotes/origin/$DEFAULT" "refs/heads/$DEFAULT"; do

@@ -16,11 +16,48 @@ mkdir -p "$STATE"
 
 # Known harness command names; extend when a new adapter is verified.
 
-harness_token_is_verified() {
-  case "$(basename -- "$1")" in
-    claude|codex|opencode|grok|pi) return 0 ;;
+harness_token_name() {
+  local token=$1 name
+  case "$(basename -- "$token")" in
+    claude|codex|opencode|grok|pi)
+      basename -- "$token"
+      return 0
+      ;;
+  esac
+  name=$(basename -- "$token")
+  case "${name%.*}" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "${name%.*}"
+      return 0
+      ;;
+  esac
+  while [ "$token" != "${token%/*}" ]; do
+    token=${token%/*}
+    name=$(basename -- "$token")
+    case "$name" in
+      claude|codex|opencode|grok|pi)
+        printf '%s\n' "$name"
+        return 0
+        ;;
+    esac
+    case "${name%.*}" in
+      claude|codex|opencode|grok|pi)
+        printf '%s\n' "${name%.*}"
+        return 0
+        ;;
+    esac
+  done
+  case "$token" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "$token"
+      return 0
+      ;;
   esac
   return 1
+}
+
+harness_token_is_verified() {
+  harness_token_name "$1" >/dev/null
 }
 
 args_command_base() {

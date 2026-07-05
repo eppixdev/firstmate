@@ -82,6 +82,7 @@ test_lib_fails_closed_for_ambiguous_remote_default() {
   git -C "$repo" push -u origin main >/dev/null
   git -C "$repo" checkout -q develop
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-ambiguous-origin.git"
 
   out=$(fm_default_branch "$repo" || true)
   [ -z "$out" ] || fail "ambiguous origin/HEAD-missing repo should fail closed, got '$out'"
@@ -113,6 +114,7 @@ test_lib_fails_closed_for_ancestry_only_remote_default() {
   git -C "$repo" push -u origin topic >/dev/null
   git -C "$repo" checkout -q develop
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-linear-origin.git"
 
   out=$(fm_default_branch "$repo" || true)
   [ -z "$out" ] || fail "ancestry-only origin/HEAD-missing repo should fail closed, got '$out'"
@@ -147,6 +149,7 @@ test_lib_fails_closed_for_lone_local_tracking_branch() {
   git -C "$repo" checkout -q -b topic origin/topic
   git -C "$repo" branch -D main >/dev/null
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-lone-local-origin.git"
 
   out=$(fm_default_branch "$repo" || true)
   [ -z "$out" ] || fail "lone local tracking branch origin/HEAD-missing repo should fail closed, got '$out'"

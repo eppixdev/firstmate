@@ -164,6 +164,7 @@ test_fails_closed_for_lone_local_tracking_branch_when_origin_head_is_missing() {
   git -C "$repo" checkout -q --detach
   git -C "$repo" branch -D develop >/dev/null
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-lone-local-origin.git"
 
   if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
     fail "default-branch repair guessed from a lone local tracking branch"
@@ -177,6 +178,42 @@ test_fails_closed_for_lone_local_tracking_branch_when_origin_head_is_missing() {
     fail "lone local tracking branch repair seeded refs/heads/topic"
   fi
   pass "fm-no-mistakes-default-branch fails closed for a lone local tracking branch"
+}
+
+test_fails_closed_for_single_fetched_topic_when_origin_head_is_missing() {
+  local seed repo origin gate err
+  seed="$TMP_ROOT/repo-single-topic-seed"
+  repo="$TMP_ROOT/repo-single-topic"
+  origin="$TMP_ROOT/origin-single-topic.git"
+  gate="$TMP_ROOT/gate-single-topic.git"
+  err="$TMP_ROOT/repo-single-topic.err"
+  make_repo_with_origin "$seed" "$origin" main
+  git -C "$seed" checkout -q -b topic
+  printf 'topic\n' >> "$seed/README.md"
+  git -C "$seed" commit -qam topic
+  git -C "$seed" push -u origin topic >/dev/null
+
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" fetch -q origin topic:refs/remotes/origin/topic
+  git -C "$repo" checkout -q --detach
+  git -C "$repo" checkout -q -b topic origin/topic
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-single-topic-origin.git"
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+
+  if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
+    fail "default-branch repair guessed from a single fetched topic branch"
+  fi
+  assert_grep "cannot determine default branch" "$err" \
+    "single fetched topic state did not fail with a clear error"
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/topic; then
+    fail "single fetched topic repair seeded refs/heads/topic"
+  fi
+  pass "fm-no-mistakes-default-branch fails closed for a single fetched topic branch"
 }
 
 test_fails_closed_for_ancestry_only_default_guess() {
@@ -199,6 +236,7 @@ test_fails_closed_for_ancestry_only_default_guess() {
   git -C "$repo" push -u origin topic >/dev/null
   git -C "$repo" checkout -q develop
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-linear-origin.git"
 
   if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
     fail "default-branch repair guessed through ancestry-only evidence"
@@ -230,6 +268,7 @@ test_fails_closed_when_origin_head_is_ambiguous() {
   git -C "$repo" push -u origin main >/dev/null
   git -C "$repo" checkout -q develop
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-ambiguous-origin.git"
 
   if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
     fail "default-branch repair guessed through an ambiguous origin/HEAD-missing state"
@@ -293,6 +332,7 @@ test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
 test_prefers_single_remote_branch_over_local_main_fallback
 test_fails_closed_for_lone_local_tracking_branch_when_origin_head_is_missing
+test_fails_closed_for_single_fetched_topic_when_origin_head_is_missing
 test_fails_closed_for_ancestry_only_default_guess
 test_fails_closed_when_origin_head_is_ambiguous
 test_resolves_relative_gate_paths_from_repo_root
