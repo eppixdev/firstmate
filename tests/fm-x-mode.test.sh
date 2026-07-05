@@ -21,6 +21,11 @@ JQ_DIR=$(command -v jq 2>/dev/null) && JQ_DIR=$(dirname "$JQ_DIR") || JQ_DIR=
 [ -n "$JQ_DIR" ] && BASE_PATH="$JQ_DIR:$BASE_PATH"
 TMP_ROOT=$(fm_test_tmproot fm-x-mode-tests)
 
+if [ -z "$JQ_DIR" ]; then
+  printf '%s\n' 'skip: jq not found (required by x-mode tests)'
+  exit 0
+fi
+
 # A fakebin `curl` that mimics the relay: it reads its behavior from env
 # (FAKE_POLL_CODE/FAKE_POLL_BODY/FAKE_ANSWER_CODE), records each call to
 # FAKE_CURL_LOG, writes the poll body to the script's -o file, and prints the

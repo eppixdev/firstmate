@@ -229,5 +229,9 @@ ROWS
 test_bootstrap_reporting
 test_no_mistakes_min_version
 test_orca_backend_gates_orca_tool_only_when_selected
-test_crew_dispatch_active_rules_are_surfaced
-test_crew_dispatch_validation
+if command -v jq >/dev/null 2>&1; then
+  test_crew_dispatch_active_rules_are_surfaced
+  test_crew_dispatch_validation
+else
+  printf '%s\n' 'skip: jq not found (required by dispatch profile validation tests)'
+fi
