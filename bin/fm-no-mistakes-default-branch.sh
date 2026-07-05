@@ -46,7 +46,11 @@ GATE_URL=$(git -C "$REPO" config --get remote.no-mistakes.url 2>/dev/null || tru
 
 case "$GATE_URL" in
   file://*) GATE_DIR=${GATE_URL#file://} ;;
-  *) GATE_DIR=$GATE_URL ;;
+  /*) GATE_DIR=$GATE_URL ;;
+  *)
+    GATE_DIR=$(cd "$REPO" && cd "$GATE_URL" 2>/dev/null && pwd -P) \
+      || { echo "error: no-mistakes gate repo is missing or invalid: $GATE_URL" >&2; exit 1; }
+    ;;
 esac
 
 git --git-dir="$GATE_DIR" rev-parse --is-bare-repository >/dev/null 2>&1 \

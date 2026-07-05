@@ -124,8 +124,49 @@ test_uses_non_main_default_branch_without_origin_head() {
   pass "fm-no-mistakes-default-branch falls back to a single non-main branch"
 }
 
+test_prefers_single_remote_branch_over_local_main_fallback() {
+  local repo origin gate out expected
+  repo="$TMP_ROOT/repo-develop-with-main"
+  origin="$TMP_ROOT/origin-develop-with-main.git"
+  gate="$TMP_ROOT/gate-develop-with-main.git"
+  make_repo_with_origin "$repo" "$origin" develop
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  git -C "$repo" branch main
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair preferred stray local main"
+  expected=$(git -C "$repo" rev-parse origin/develop)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/develop)" = "$expected" ] \
+    || fail "repair did not prefer the single origin/develop branch"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror develop, origin/develop, and HEAD" \
+    "repair did not report the develop self-heal when local main existed"
+  pass "fm-no-mistakes-default-branch prefers remote branch evidence over local main"
+}
+
+test_resolves_relative_gate_paths_from_repo_root() {
+  local fixture repo origin gate out expected
+  fixture="$TMP_ROOT/relative-gate-fixture"
+  repo="$fixture/repo"
+  origin="$fixture/origin.git"
+  gate="$fixture/gate.git"
+  mkdir -p "$fixture"
+  make_repo_with_origin "$repo" "$origin"
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes ../gate.git
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed for relative gate path"
+  expected=$(git -C "$repo" rev-parse origin/main)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "repair did not seed refs/heads/main through the relative gate path"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror main, origin/main, and HEAD" \
+    "repair did not report the relative-path self-heal"
+  pass "fm-no-mistakes-default-branch resolves relative gate paths from the repo root"
+}
+
 test_repairs_missing_gate_refs
 test_noop_when_gate_is_current
 test_repairs_head_when_refs_are_already_seeded
 test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
+test_prefers_single_remote_branch_over_local_main_fallback
+test_resolves_relative_gate_paths_from_repo_root

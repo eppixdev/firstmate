@@ -27,12 +27,6 @@ fm_default_branch() {
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
-  for branch in main master; do
-    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
-      printf '%s\n' "$branch"
-      return 0
-    fi
-  done
   locals=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads)
   remotes=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/origin \
     | grep -v '^origin/HEAD$' || true)
@@ -48,6 +42,18 @@ fm_default_branch() {
     printf '%s\n' "$candidate"
     return 0
   fi
+  for branch in main master; do
+    if git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
+  for branch in main master; do
+    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
   return 1
 }
 
