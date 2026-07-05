@@ -27,6 +27,10 @@
 # bin/fm-watch-arm.sh through the harness's tracked background mechanism. Direct
 # duplicate invocations of this script still no-op through the watcher singleton
 # lock.
+# The liveness beacon is an owned record, not a bare touch: each poll rewrites
+# state/.last-watcher-beat atomically with the watcher's pid, pid-identity,
+# watcher path, FM_HOME, and beat time so guard/arm can reject leftover or
+# mismatched fresh mtimes.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
