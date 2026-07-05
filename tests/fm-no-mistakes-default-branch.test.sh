@@ -143,14 +143,48 @@ test_prefers_single_remote_branch_over_local_main_fallback() {
   pass "fm-no-mistakes-default-branch prefers remote branch evidence over local main"
 }
 
-test_uses_ancestor_branch_when_origin_head_is_missing() {
-  local repo origin gate out expected
-  repo="$TMP_ROOT/repo-develop-and-topic"
-  origin="$TMP_ROOT/origin-develop-and-topic.git"
-  gate="$TMP_ROOT/gate-develop-and-topic.git"
+test_uses_unique_tracking_branch_when_origin_head_is_missing() {
+  local repo origin gate peer out expected
+  repo="$TMP_ROOT/repo-develop-and-remote-topic"
+  origin="$TMP_ROOT/origin-develop-and-remote-topic.git"
+  gate="$TMP_ROOT/gate-develop-and-remote-topic.git"
+  peer="$TMP_ROOT/repo-develop-and-remote-topic-peer"
   make_repo_with_origin "$repo" "$origin" develop
   git init --bare -q "$gate"
   git -C "$repo" remote add no-mistakes "$gate"
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  git -C "$peer" checkout -q -b topic
+  printf 'topic\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam topic
+  git -C "$peer" push -u origin topic >/dev/null
+  git -C "$repo" fetch -q origin topic
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed with a unique tracking branch"
+  expected=$(git -C "$repo" rev-parse origin/develop)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/develop)" = "$expected" ] \
+    || fail "repair did not choose the unique local tracking branch when origin/HEAD was missing"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror develop, origin/develop, and HEAD" \
+    "repair did not report the unique-tracking-branch self-heal"
+  pass "fm-no-mistakes-default-branch uses a unique local tracking branch when origin/HEAD is missing"
+}
+
+test_fails_closed_for_ancestry_only_default_guess() {
+  local repo origin gate err
+  repo="$TMP_ROOT/repo-linear-main-develop-topic"
+  origin="$TMP_ROOT/origin-linear-main-develop-topic.git"
+  gate="$TMP_ROOT/gate-linear-main-develop-topic.git"
+  err="$TMP_ROOT/linear-main-develop-topic.err"
+  make_repo_with_origin "$repo" "$origin" main
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  git -C "$repo" checkout -q -b develop
+  printf 'develop\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam develop
+  git -C "$repo" push -u origin develop >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/develop
   git -C "$repo" checkout -q -b topic
   printf 'topic\n' >> "$repo/README.md"
   git -C "$repo" commit -qam topic
@@ -158,13 +192,18 @@ test_uses_ancestor_branch_when_origin_head_is_missing() {
   git -C "$repo" checkout -q develop
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
 
-  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed without origin/HEAD"
-  expected=$(git -C "$repo" rev-parse origin/develop)
-  [ "$(git --git-dir="$gate" rev-parse refs/heads/develop)" = "$expected" ] \
-    || fail "repair did not choose the ancestor default branch when origin/HEAD was missing"
-  assert_contains "$out" "healed: seeded no-mistakes gate mirror develop, origin/develop, and HEAD" \
-    "repair did not report the ancestor-branch self-heal"
-  pass "fm-no-mistakes-default-branch infers develop from remote branch ancestry"
+  if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
+    fail "default-branch repair guessed through ancestry-only evidence"
+  fi
+  assert_grep "cannot determine default branch" "$err" \
+    "ancestry-only origin/HEAD-missing state did not fail with a clear error"
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/main; then
+    fail "ancestry-only repair seeded refs/heads/main"
+  fi
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/develop; then
+    fail "ancestry-only repair seeded refs/heads/develop"
+  fi
+  pass "fm-no-mistakes-default-branch fails closed for ancestry-only default guesses"
 }
 
 test_fails_closed_when_origin_head_is_ambiguous() {
@@ -245,7 +284,8 @@ test_repairs_head_when_refs_are_already_seeded
 test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
 test_prefers_single_remote_branch_over_local_main_fallback
-test_uses_ancestor_branch_when_origin_head_is_missing
+test_uses_unique_tracking_branch_when_origin_head_is_missing
+test_fails_closed_for_ancestry_only_default_guess
 test_fails_closed_when_origin_head_is_ambiguous
 test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories

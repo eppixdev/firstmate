@@ -88,6 +88,37 @@ test_lib_fails_closed_for_ambiguous_remote_default() {
   pass "fm_default_branch fails closed when origin/HEAD is ambiguous"
 }
 
+test_lib_fails_closed_for_ancestry_only_remote_default() {
+  local repo origin out
+  repo="$TMP_ROOT/lib-linear-repo"
+  origin="$TMP_ROOT/lib-linear-origin.git"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'main\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin main >/dev/null
+  git -C "$repo" checkout -q -b develop
+  printf 'develop\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam develop
+  git -C "$repo" push -u origin develop >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/develop
+  git -C "$repo" checkout -q -b topic
+  printf 'topic\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam topic
+  git -C "$repo" push -u origin topic >/dev/null
+  git -C "$repo" checkout -q develop
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "ancestry-only origin/HEAD-missing repo should fail closed, got '$out'"
+  pass "fm_default_branch fails closed when only ancestry suggests a default"
+}
+
 # --- GUARD 2a: fm-guard banner ----------------------------------------------
 
 run_guard() {
@@ -244,6 +275,7 @@ test_spawn_isolation_abort() {
 
 test_lib_classification
 test_lib_fails_closed_for_ambiguous_remote_default
+test_lib_fails_closed_for_ancestry_only_remote_default
 test_guard_banner
 test_bootstrap_line
 test_brief_assertion_precedes_branch
