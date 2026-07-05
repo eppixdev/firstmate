@@ -21,7 +21,8 @@
 # then fall back to local or remote branch evidence when there is a single
 # unambiguous candidate. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch locals remotes candidate candidate_count other ok
+  local dir=$1 ref branch locals remotes remote_names candidate candidate_count other ok
+  local local_count remote_count upstream_remote upstream_merge
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
@@ -30,14 +31,23 @@ fm_default_branch() {
   locals=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads)
   remotes=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/origin \
     | grep -v '^origin/HEAD$' || true)
-  if [ "$(printf '%s\n' "$locals" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
-    candidate=$(printf '%s\n' "$locals" | sed -n '/./{p;q;}')
-    if git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
-      printf '%s\n' "$candidate"
+  remote_names=$(printf '%s\n' "$remotes" | sed -n 's#^origin/##p')
+  local_count=$(printf '%s\n' "$locals" | sed '/^$/d' | wc -l | tr -d ' ')
+  remote_count=$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$remote_count" = "0" ]; then
+    for branch in main master; do
+      if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
+        printf '%s\n' "$branch"
+        return 0
+      fi
+    done
+    if [ "$local_count" = "1" ]; then
+      printf '%s\n' "$locals" | sed -n '/./{p;q;}'
       return 0
     fi
+    return 1
   fi
-  if [ "$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
+  if [ "$remote_count" = "1" ]; then
     candidate=$(printf '%s\n' "$remotes" | sed -n '/./{s#^origin/##;p;q;}')
     printf '%s\n' "$candidate"
     return 0
@@ -47,6 +57,10 @@ fm_default_branch() {
   while IFS= read -r branch; do
     [ -n "$branch" ] || continue
     git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" || continue
+    upstream_remote=$(git -C "$dir" config --get "branch.$branch.remote" 2>/dev/null || true)
+    upstream_merge=$(git -C "$dir" config --get "branch.$branch.merge" 2>/dev/null || true)
+    [ "$upstream_remote" = "origin" ] || continue
+    [ "$upstream_merge" = "refs/heads/$branch" ] || continue
     ok=1
     while IFS= read -r other; do
       [ -n "$other" ] || continue
@@ -57,34 +71,45 @@ fm_default_branch() {
         break
       }
     done <<EOF
-$(
-  printf '%s\n' "$remotes" | sed -n 's#^origin/##p'
-)
+$remote_names
 EOF
     [ "$ok" = 1 ] || continue
     candidate=$branch
     candidate_count=$((candidate_count + 1))
   done <<EOF
-$(
-  printf '%s\n' "$remotes" | sed -n 's#^origin/##p'
-)
+$remote_names
 EOF
   if [ "$candidate_count" = "1" ]; then
     printf '%s\n' "$candidate"
     return 0
   fi
-  for branch in main master; do
-    if git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-      printf '%s\n' "$branch"
-      return 0
-    fi
-  done
-  for branch in main master; do
-    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
-      printf '%s\n' "$branch"
-      return 0
-    fi
-  done
+  candidate=
+  candidate_count=0
+  while IFS= read -r branch; do
+    branch=${branch#origin/}
+    [ -n "$branch" ] || continue
+    ok=1
+    while IFS= read -r other; do
+      [ -n "$other" ] || continue
+      [ "$other" = "$branch" ] && continue
+      git -C "$dir" merge-base --is-ancestor "refs/remotes/origin/$branch" "refs/remotes/origin/$other" \
+        >/dev/null 2>&1 || {
+        ok=0
+        break
+      }
+    done <<EOF
+$remote_names
+EOF
+    [ "$ok" = 1 ] || continue
+    candidate=$branch
+    candidate_count=$((candidate_count + 1))
+  done <<EOF
+$remote_names
+EOF
+  if [ "$candidate_count" = "1" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
   return 1
 }
 

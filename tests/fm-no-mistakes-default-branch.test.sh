@@ -167,6 +167,37 @@ test_uses_ancestor_branch_when_origin_head_is_missing() {
   pass "fm-no-mistakes-default-branch infers develop from remote branch ancestry"
 }
 
+test_fails_closed_when_origin_head_is_ambiguous() {
+  local repo origin gate err
+  repo="$TMP_ROOT/repo-ambiguous-default"
+  origin="$TMP_ROOT/origin-ambiguous-default.git"
+  gate="$TMP_ROOT/gate-ambiguous-default.git"
+  err="$TMP_ROOT/ambiguous-default.err"
+  make_repo_with_origin "$repo" "$origin" develop
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  git -C "$repo" checkout -q --orphan main
+  printf 'main\n' > "$repo/MAIN.md"
+  git -C "$repo" add MAIN.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" push -u origin main >/dev/null
+  git -C "$repo" checkout -q develop
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
+    fail "default-branch repair guessed through an ambiguous origin/HEAD-missing state"
+  fi
+  assert_grep "cannot determine default branch" "$err" \
+    "ambiguous origin/HEAD-missing state did not fail with a clear error"
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/main; then
+    fail "ambiguous repair seeded refs/heads/main"
+  fi
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/develop; then
+    fail "ambiguous repair seeded refs/heads/develop"
+  fi
+  pass "fm-no-mistakes-default-branch fails closed when origin/HEAD is ambiguous"
+}
+
 test_resolves_relative_gate_paths_from_repo_root() {
   local fixture repo origin gate out expected
   fixture="$TMP_ROOT/relative-gate-fixture"
@@ -215,5 +246,6 @@ test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
 test_prefers_single_remote_branch_over_local_main_fallback
 test_uses_ancestor_branch_when_origin_head_is_missing
+test_fails_closed_when_origin_head_is_ambiguous
 test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories
