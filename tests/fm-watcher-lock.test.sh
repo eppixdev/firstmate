@@ -507,6 +507,34 @@ test_arm_reports_healthy_for_live_fresh_watcher() {
   pass "arm reports a live fresh watcher as healthy and exits zero"
 }
 
+test_arm_reports_healthy_for_matching_legacy_fresh_watcher() {
+  local dir state fakebin armout live identity status
+  dir=$(make_case arm-legacy-healthy)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  sleep 300 &
+  live=$!
+  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live") || fail "could not identify legacy watcher pid"
+  mkdir "$state/.watch.lock"
+  printf '%s\n' "$live" > "$state/.watch.lock/pid"
+  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
+  touch "$state/.last-watcher-beat"
+
+  status=0
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_ARM_CONFIRM_TIMEOUT=1 "$WATCH_ARM" > "$armout" || status=$?
+  [ "$status" -eq 0 ] || fail "arm did not exit zero for a matching legacy watcher (status $status): $(cat "$armout")"
+  grep -F "watcher: healthy pid=$live" "$armout" >/dev/null || fail "arm did not report the matching legacy watcher as healthy"
+  ! grep -qF 'watcher: started' "$armout" || fail "arm started a second watcher behind a matching legacy watcher"
+  ! grep -qF 'watcher: FAILED' "$armout" || fail "arm reported FAILED for a matching legacy watcher"
+  [ "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" = "$live" ] || fail "arm disturbed the matching legacy watcher's lock"
+  kill "$live" 2>/dev/null || true
+  wait "$live" 2>/dev/null || true
+  pass "arm reports a matching legacy fresh watcher as healthy during migration"
+}
+
 test_arm_starts_and_self_heals() {
   # Arming with no confirmable watcher must FORK one and confirm it live + fresh
   # before reporting 'started' - whether the lock is empty (clean start) or held
@@ -829,6 +857,7 @@ test_lock_paused_mid_acquire_claim_fails_during_steal
 test_watch_restart_rejects_reused_pid
 test_watcher_self_evicts_on_lock_takeover
 test_arm_reports_healthy_for_live_fresh_watcher
+test_arm_reports_healthy_for_matching_legacy_fresh_watcher
 test_arm_starts_and_self_heals
 test_arm_self_heals_reused_pid_lock
 test_arm_hup_cleans_child_and_temp_output
