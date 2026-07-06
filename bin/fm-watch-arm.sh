@@ -32,6 +32,14 @@
 # A healthy line means a live cycle already exists; do not churn extra no-op arms
 # until that cycle fires.
 #
+# --keepalive: keep running after actionable wakes and immediately arm the next
+# cycle. Some harnesses do not surface long-running background task completion
+# back to firstmate automatically. In those environments the default one-shot
+# arm can fire correctly, queue a wake, and then leave supervision down until a
+# human sends the next prompt. Keepalive mode preserves the existing wake queue
+# and stdout reason line, but starts a fresh watcher cycle right away so
+# firstmate is not blind between prompts.
+#
 # --restart: stop ONLY this FM_HOME's watcher (the pid recorded in THIS home's
 # state/.watch.lock) and start a fresh one. It resolves and signals exactly that
 # pid, so it can never touch another home's watcher. NEVER `pkill -f
@@ -132,11 +140,58 @@ exit_with_wake() {
 }
 
 mode=arm
-case "${1:-}" in
-  ''|arm|--arm) mode=arm ;;
-  --restart) mode=restart ;;
-  *) echo "usage: $(basename "$0") [--restart]" >&2; exit 2 ;;
-esac
+keepalive=0
+for arg in "$@"; do
+  case "$arg" in
+    ''|arm|--arm) mode=arm ;;
+    --restart) mode=restart ;;
+    --keepalive) keepalive=1 ;;
+    *) echo "usage: $(basename "$0") [--keepalive] [--restart]" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$keepalive" -eq 1 ] && [ -z "${FM_WATCH_ARM_KEEPALIVE_CHILD:-}" ]; then
+  keepalive_child=
+  cleanup_keepalive_child() {
+    if [ -n "$keepalive_child" ] && fm_pid_alive "$keepalive_child"; then
+      kill -TERM "$keepalive_child" 2>/dev/null || true
+    fi
+  }
+  trap 'cleanup_keepalive_child; exit 129' HUP
+  trap 'cleanup_keepalive_child; exit 143' TERM INT
+
+  first=1
+  while :; do
+    child_mode=--arm
+    if [ "$first" -eq 1 ] && [ "$mode" = restart ]; then
+      child_mode=--restart
+    fi
+    first=0
+
+    FM_WATCH_ARM_KEEPALIVE_CHILD=1 "$0" "$child_mode" &
+    keepalive_child=$!
+    wait "$keepalive_child"
+    rc=$?
+    keepalive_child=
+
+    case "$rc" in
+      "$WAKE_EXIT_STATUS")
+        # The child already printed the wake reason and queued the durable wake.
+        # Keep the next cycle live even if this harness never surfaces that
+        # background completion back to firstmate.
+        ;;
+      0)
+        # Another healthy watcher may own the singleton. Poll lightly until this
+        # keepalive wrapper can take over a later lapsed cycle.
+        sleep "${FM_WATCH_ARM_KEEPALIVE_IDLE_SLEEP:-5}"
+        ;;
+      *)
+        echo "watcher: keepalive retry after arm exit $rc" >&2
+        sleep "${FM_WATCH_ARM_KEEPALIVE_RETRY_SLEEP:-5}"
+        ;;
+    esac
+  done
+fi
 
 if [ "$mode" = restart ]; then
   # Home-scoped stop: only the watcher pid recorded in THIS home's lock.

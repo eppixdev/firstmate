@@ -249,12 +249,35 @@ ensure the daemon is running, because the daemon owns watcher supervision.
 
 EOF
 elif [ -f "$CONFIG/x-mode.env" ]; then
-  cat <<EOF
+  if [ -n "${CODEX_CI:-}" ]; then
+    cat <<EOF
+Arm the watcher yourself as your harness's own tracked background task with
+the X-mode cadence sourced first.
+This Codex session should use keepalive mode because background task completion
+does not reliably re-enter firstmate here.
+
+  [ -f "$CONFIG/x-mode.env" ] && . "$CONFIG/x-mode.env"
+  bin/fm-watch-arm.sh --keepalive
+
+EOF
+  else
+    cat <<EOF
 Arm the watcher yourself as your harness's own tracked background task with
 the X-mode cadence sourced first - this script never arms it itself.
 
   [ -f "$CONFIG/x-mode.env" ] && . "$CONFIG/x-mode.env"
   bin/fm-watch-arm.sh
+
+EOF
+  fi
+else
+if [ -n "${CODEX_CI:-}" ]; then
+cat <<'EOF'
+Arm the watcher yourself as your harness's own tracked background task.
+This Codex session should use keepalive mode because background task completion
+does not reliably re-enter firstmate here.
+
+  bin/fm-watch-arm.sh --keepalive
 
 EOF
 else
@@ -267,6 +290,7 @@ supervision (AGENTS.md section 8).
   bin/fm-watch-arm.sh
 
 EOF
+fi
 fi
 cat <<'EOF'
 The digest above is complete for this session start. Do NOT re-read

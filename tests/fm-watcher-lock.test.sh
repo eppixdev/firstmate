@@ -701,6 +701,53 @@ test_arm_surfaces_delayed_signal_wake_with_nonzero_exit() {
   pass "arm surfaces a delayed signal wake with the dedicated wake exit status"
 }
 
+test_keepalive_rearms_after_actionable_wake() {
+  local dir state fakebin armout drain_out status_file armpid i before after
+  dir=$(make_case arm-keepalive-rearm)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  drain_out="$dir/drain.out"
+  status_file="$state/task.status"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_WATCH_ARM_KEEPALIVE_IDLE_SLEEP=1 \
+    "$WATCH_ARM" --keepalive > "$armout" &
+  armpid=$!
+
+  i=0
+  while [ "$i" -lt 80 ]; do
+    grep -qF 'watcher: started pid=' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout" || fail "keepalive arm did not start the first watcher"
+  before=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  [ -n "$before" ] || fail "first keepalive watcher did not record a pid"
+
+  printf 'done: PR https://example.test/pr/11\n' > "$status_file"
+  i=0
+  while [ "$i" -lt 100 ]; do
+    [ "$(grep -cF 'watcher: started pid=' "$armout" 2>/dev/null || echo 0)" -ge 2 ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ "$(grep -cF 'watcher: started pid=' "$armout" 2>/dev/null || echo 0)" -ge 2 ] \
+    || fail "keepalive arm did not rearm after wake: $(cat "$armout")"
+  grep -F "signal: $status_file" "$armout" >/dev/null || fail "keepalive child did not print the wake reason"
+  after=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  [ -n "$after" ] || fail "second keepalive watcher did not record a pid"
+  [ "$after" != "$before" ] || fail "keepalive did not replace the fired watcher"
+  kill -0 "$after" 2>/dev/null || fail "second keepalive watcher is not alive"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after keepalive wake failed"
+  grep "$(printf '\tsignal\t')" "$drain_out" | grep -F "$status_file" >/dev/null || fail "keepalive wake was not queued"
+
+  kill "$armpid" "$after" 2>/dev/null || true
+  wait "$armpid" 2>/dev/null || true
+  pass "keepalive arm starts a fresh watcher cycle after an actionable wake"
+}
+
 test_arm_waits_for_peer_beacon_after_child_stands_down() {
   local dir state fakebin armout peer beater identity status
   dir=$(make_case arm-peer-startup-race)
@@ -863,6 +910,7 @@ test_arm_self_heals_reused_pid_lock
 test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
+test_keepalive_rearms_after_actionable_wake
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_accepts_equivalent_home_aliases
 test_arm_rejects_leftover_fresh_beacon_until_child_owns_it

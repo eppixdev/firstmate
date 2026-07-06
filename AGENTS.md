@@ -663,6 +663,8 @@ The arm chain IS the supervision: while any task is in flight, keep exactly one 
 Each cycle is one harness-tracked background task that blocks until an actionable wake is due (benign wakes are absorbed in bash without ending the task), fires with one reason line, and ends, so the chain survives only when firstmate starts the next cycle after each fire.
 After handling the drained wakes, re-arm before you end the turn by running `bin/fm-watch-arm.sh` as its own background task.
 Arm or re-arm the watcher only through the harness's own tracked background mechanism - the one that survives the call and notifies you when the process exits - so the cycle actually persists and the next wake reaches you.
+If the current harness does not reliably notify firstmate when a tracked background task completes, run `bin/fm-watch-arm.sh --keepalive` instead.
+Keepalive mode keeps the same durable wake queue and printed reason lines, but starts the next watcher cycle immediately after an actionable wake so supervision is not down while waiting for a human prompt.
 Never fire-and-forget the watcher with a shell `&` inside another call: that backgrounded child is reaped when the call returns, so supervision silently stops, and worse, the dying process reports a false "already running" that hides the gap.
 **Standalone, never bundled.**
 Run `bin/fm-watch-arm.sh` as its OWN background task with nothing else in that bash, never tacked onto the tail of a multi-command call: bundled, its self-verifying status line is buried in unrelated output and it can silently no-op as a side effect of those other commands, so no fresh cycle gets established and supervision lapses unnoticed.
@@ -670,6 +672,7 @@ Run `bin/fm-watch-arm.sh` as its OWN background task with nothing else in that b
 Treat that line, not a process count or an unverified "already running", as the source of truth for watcher state.
 `started` and `healthy` still mean the cycle is live and the arm exits zero.
 `FAILED` exits non-zero, and an actionable wake also exits with a dedicated non-zero wake status after printing the wake reason, so harnesses that only surface non-zero background completions still surface real watcher fires instead of silently treating them as success.
+In keepalive mode, actionable wakes still print and queue the same way, but the arm wrapper stays alive and immediately re-arms.
 **Re-arm after each FIRE; do not churn on a no-op.**
 Read that line to know whether a cycle is already live: `started` (this arm just launched the live cycle, now blocking for the next wake) and `healthy` (a live cycle already held the lock) both mean a cycle is live, so do NOT start another - re-running it while one is healthy only churns no-op tasks and never establishes a fresh cycle; `FAILED` means no live cycle, so arm one now after draining any queued wakes.
 A cycle is down only when its background task completes carrying a WAKE REASON (`signal`/`stale`/`check`/`heartbeat`): that is the watcher firing, and that is the one moment to handle the wake and then start exactly one fresh cycle.
@@ -686,6 +689,7 @@ Empty polls, elapsed waiting time, and "still no change" are tool bookkeeping, n
 
 ```sh
 bin/fm-watch-arm.sh        # safe verified re-arm; run as harness-tracked background; no-ops if healthy
+bin/fm-watch-arm.sh --keepalive  # keep a fresh cycle live when the harness does not notify on background completion
 bin/fm-watch-arm.sh --restart  # home-scoped forced restart; never a broad pkill
 bin/fm-watch.sh            # the watcher itself; exits with: signal|stale|check|heartbeat
 bin/fm-wake-drain.sh       # drain queued wake records at turn start; asserts guard after draining
