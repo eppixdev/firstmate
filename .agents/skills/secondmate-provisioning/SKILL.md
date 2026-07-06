@@ -1,6 +1,6 @@
 ---
 name: secondmate-provisioning
-description: Agent-only reference for persistent secondmate setup and retirement. Use when creating, seeding, validating, recovering, handing backlog to, pushing inherited config into, or retiring a secondmate home, or when editing data/secondmates.md. Covers home leases, transactional seeding, project clone restrictions, inherited config push, idle charter, handoff helper, and teardown safety.
+description: Agent-only reference for persistent secondmate setup and retirement. Use when creating, seeding, validating, recovering, handing backlog to, pushing inherited config into, or retiring a secondmate home, or when editing data/secondmates.md. Covers home leases, transactional seeding, no-mistakes gate repair, project clone restrictions, inherited config push, idle charter, handoff helper, and teardown safety.
 user-invocable: false
 metadata:
   internal: true
@@ -62,11 +62,11 @@ Direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
 Run `bin/fm-home-seed.sh validate` when checking registry integrity; it refuses duplicate ids, duplicate homes, and nested or overlapping homes.
 
 Seeding is transactional.
-If validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
+If validation, cloning, no-mistakes initialization, no-mistakes gate-mirror default-branch repair, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 
 Secondmate project lists may include `no-mistakes` and `direct-PR` projects only.
 `local-only` projects stay with the main firstmate.
-For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
+For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home, verifies or repairs their gate-mirror default-branch refs, and refuses to mutate a preexisting clone that is not already initialized.
 
 ## Backlog handoff
 
