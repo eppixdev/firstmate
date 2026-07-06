@@ -32,6 +32,20 @@ make_repo() {
   printf '%s\n' "$dir"
 }
 
+run_with_timeout() {
+  local limit=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$limit" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$limit" "$@"
+  else
+    "$@"
+  fi
+}
+
 # --- shared lib: branch classification --------------------------------------
 
 # fm_primary_tangle_branch is the whole scoping decision: a NAMED non-default
@@ -154,6 +168,24 @@ test_lib_fails_closed_for_lone_local_tracking_branch() {
   out=$(fm_default_branch "$repo" || true)
   [ -z "$out" ] || fail "lone local tracking branch origin/HEAD-missing repo should fail closed, got '$out'"
   pass "fm_default_branch fails closed when only a local topic branch tracks origin"
+}
+
+test_lib_stays_local_only_when_origin_is_unreachable() {
+  local repo out rc
+  repo="$TMP_ROOT/lib-unreachable-origin-repo"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  git -C "$repo" commit -q --allow-empty -m init
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin ssh://203.0.113.1/does/not/exist.git
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  out=$(run_with_timeout 2 bash -lc '. "$1/bin/fm-tangle-lib.sh"; fm_default_branch "$2" || true' _ "$ROOT" "$repo")
+  rc=$?
+  [ "$rc" = "0" ] || fail "origin/HEAD-missing unreachable origin should not block local default-branch resolution (rc=$rc)"
+  [ -z "$out" ] || fail "origin/HEAD-missing unreachable origin should fail closed, got '$out'"
+  pass "fm_default_branch stays local-only when origin is unreachable"
 }
 
 # --- GUARD 2a: fm-guard banner ----------------------------------------------
@@ -314,6 +346,7 @@ test_lib_classification
 test_lib_fails_closed_for_ambiguous_remote_default
 test_lib_fails_closed_for_ancestry_only_remote_default
 test_lib_fails_closed_for_lone_local_tracking_branch
+test_lib_stays_local_only_when_origin_is_unreachable
 test_guard_banner
 test_bootstrap_line
 test_brief_assertion_precedes_branch

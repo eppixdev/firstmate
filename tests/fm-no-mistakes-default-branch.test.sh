@@ -325,6 +325,54 @@ test_resolves_relative_gate_paths_from_subdirectories() {
   pass "fm-no-mistakes-default-branch resolves relative gate paths from subdirectories"
 }
 
+test_refreshes_stale_remote_default_before_repair() {
+  local repo peer origin gate out expected stale
+  repo="$TMP_ROOT/repo-stale-origin-main"
+  peer="$TMP_ROOT/repo-stale-origin-main-peer"
+  origin="$TMP_ROOT/origin-stale-origin-main.git"
+  gate="$TMP_ROOT/gate-stale-origin-main.git"
+  make_repo_with_origin "$repo" "$origin"
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  printf 'peer\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam peer
+  git -C "$peer" push origin main >/dev/null
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+
+  stale=$(git -C "$repo" rev-parse origin/main)
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed for stale origin/main"
+  expected=$(git --git-dir="$origin" rev-parse refs/heads/main)
+  [ "$stale" != "$expected" ] || fail "test fixture did not leave origin/main stale before repair"
+  [ "$(git -C "$repo" rev-parse origin/main)" = "$expected" ] \
+    || fail "repair did not refresh origin/main before seeding the gate"
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "repair did not seed refs/heads/main from the refreshed origin/main"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror main, origin/main, and HEAD" \
+    "repair did not report the stale-origin self-heal"
+  pass "fm-no-mistakes-default-branch refreshes origin/main before repair"
+}
+
+test_rejects_non_bare_gate_repo() {
+  local repo origin gate err
+  repo="$TMP_ROOT/repo-non-bare-gate"
+  origin="$TMP_ROOT/origin-non-bare-gate.git"
+  gate="$TMP_ROOT/non-bare-gate"
+  err="$TMP_ROOT/non-bare-gate.err"
+  make_repo_with_origin "$repo" "$origin"
+  git init -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate/.git"
+
+  if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
+    fail "repair accepted a non-bare no-mistakes gate repo"
+  fi
+  assert_grep "non-bare" "$err" \
+    "non-bare no-mistakes gate repo did not fail with a clear error"
+  pass "fm-no-mistakes-default-branch rejects non-bare gate repos"
+}
+
 test_repairs_missing_gate_refs
 test_noop_when_gate_is_current
 test_repairs_head_when_refs_are_already_seeded
@@ -337,3 +385,5 @@ test_fails_closed_for_ancestry_only_default_guess
 test_fails_closed_when_origin_head_is_ambiguous
 test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories
+test_refreshes_stale_remote_default_before_repair
+test_rejects_non_bare_gate_repo

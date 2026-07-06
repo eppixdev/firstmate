@@ -17,26 +17,27 @@
 # default branch. Detached HEAD on the default is fine; a feature branch in a
 # primary checkout is the alarm.
 
-# Resolve the default branch name of the git repo at <dir>: prefer origin/HEAD,
-# then fall back only for local-only repos where branch evidence is still
-# authoritative. Echoes the name, or returns 1.
+# Resolve the default branch name of the git repo at <dir>: prefer the local
+# origin/HEAD tracking ref, then fall back only for local-only repos where
+# branch evidence is still authoritative. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch locals remotes
+  local dir=$1 ref branch locals remotes has_origin
   local local_count remote_count
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  if [ -z "$ref" ]; then
-    ref=$(git -C "$dir" ls-remote --symref origin HEAD 2>/dev/null \
-      | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]\+HEAD$#origin/\1#p' \
-      | sed -n '/./{p;q;}')
-  fi
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
+  has_origin=0
+  if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    has_origin=1
+  fi
   remotes=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/origin \
     | grep -v '^origin/HEAD$' || true)
   remote_count=$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')
-  [ "$remote_count" = "0" ] || return 1
+  if [ "$has_origin" = "1" ] || [ "$remote_count" != "0" ]; then
+    return 1
+  fi
   locals=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads)
   local_count=$(printf '%s\n' "$locals" | sed '/^$/d' | wc -l | tr -d ' ')
   for branch in main master; do
