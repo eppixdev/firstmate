@@ -58,6 +58,22 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { echo "error: $REPO is not a git work tree" >&2; exit 1; }
 WORKTREE_ROOT=$(git -C "$REPO" rev-parse --show-toplevel)
 
+GATE_URL=$(git -C "$REPO" config --get remote.no-mistakes.url 2>/dev/null || true)
+[ -n "$GATE_URL" ] || { echo "error: repo $REPO is not initialized for no-mistakes (missing remote.no-mistakes.url)" >&2; exit 1; }
+
+case "$GATE_URL" in
+  file://*) GATE_DIR=${GATE_URL#file://} ;;
+  /*) GATE_DIR=$GATE_URL ;;
+  *)
+    GATE_DIR=$(cd "$WORKTREE_ROOT" && cd "$GATE_URL" 2>/dev/null && pwd -P) \
+      || { echo "error: no-mistakes gate repo is missing or invalid: $GATE_URL" >&2; exit 1; }
+    ;;
+esac
+
+IS_BARE=$(git --git-dir="$GATE_DIR" rev-parse --is-bare-repository 2>/dev/null || true)
+[ "$IS_BARE" = "true" ] \
+  || { echo "error: no-mistakes gate repo is missing, invalid, or non-bare: $GATE_DIR" >&2; exit 1; }
+
 DEFAULT=
 if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
   DEFAULT=$(probe_origin_default_branch "$REPO" || true)
@@ -78,22 +94,6 @@ elif git -C "$REPO" rev-parse --verify --quiet "refs/heads/$DEFAULT^{commit}" >/
 fi
 [ -n "$SOURCE_REF" ] \
   || { echo "error: source repo $REPO is missing $DEFAULT in both origin/$DEFAULT and local $DEFAULT" >&2; exit 1; }
-
-GATE_URL=$(git -C "$REPO" config --get remote.no-mistakes.url 2>/dev/null || true)
-[ -n "$GATE_URL" ] || { echo "error: repo $REPO is not initialized for no-mistakes (missing remote.no-mistakes.url)" >&2; exit 1; }
-
-case "$GATE_URL" in
-  file://*) GATE_DIR=${GATE_URL#file://} ;;
-  /*) GATE_DIR=$GATE_URL ;;
-  *)
-    GATE_DIR=$(cd "$WORKTREE_ROOT" && cd "$GATE_URL" 2>/dev/null && pwd -P) \
-      || { echo "error: no-mistakes gate repo is missing or invalid: $GATE_URL" >&2; exit 1; }
-    ;;
-esac
-
-IS_BARE=$(git --git-dir="$GATE_DIR" rev-parse --is-bare-repository 2>/dev/null || true)
-[ "$IS_BARE" = "true" ] \
-  || { echo "error: no-mistakes gate repo is missing, invalid, or non-bare: $GATE_DIR" >&2; exit 1; }
 
 TARGET_SHA=$(git -C "$REPO" rev-parse "$SOURCE_REF^{commit}")
 HEAD_REF="refs/heads/$DEFAULT"

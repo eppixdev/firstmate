@@ -90,17 +90,30 @@ test_repairs_head_when_refs_are_already_seeded() {
 }
 
 test_fails_without_no_mistakes_remote() {
-  local repo origin err
+  local repo origin peer err stale advanced after
   repo="$TMP_ROOT/repo-missing-remote"
   origin="$TMP_ROOT/origin-missing-remote.git"
+  peer="$TMP_ROOT/repo-missing-remote-peer"
   err="$TMP_ROOT/missing-remote.err"
   make_repo_with_origin "$repo" "$origin"
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  printf 'peer\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam peer
+  git -C "$peer" push origin main >/dev/null
+  stale=$(git -C "$repo" rev-parse origin/main)
+  advanced=$(git --git-dir="$origin" rev-parse refs/heads/main)
 
   if "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null 2>"$err"; then
     fail "repair succeeded without a no-mistakes remote"
   fi
+  after=$(git -C "$repo" rev-parse origin/main)
   assert_grep "missing remote.no-mistakes.url" "$err" \
     "missing no-mistakes remote did not fail with a clear error"
+  [ "$stale" != "$advanced" ] || fail "test fixture did not advance origin/main"
+  [ "$after" = "$stale" ] \
+    || fail "missing no-mistakes remote path refreshed origin/main before failing"
   pass "fm-no-mistakes-default-branch fails fast when no-mistakes is not initialized"
 }
 
