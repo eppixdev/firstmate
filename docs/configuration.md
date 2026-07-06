@@ -50,6 +50,15 @@ That evidence policy is specific to the firstmate repo: target projects may legi
 That command requires `tmux` on `PATH`, prints `tmux -V`, runs every `tests/*.test.sh` with `bash`, and fails if any script exits non-zero.
 It intentionally mirrors the behavior-test baseline in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) instead of delegating the test step to an agent.
 
+## no-mistakes gate mirror defaults
+
+`bin/fm-no-mistakes-default-branch.sh [repo]` verifies or repairs the local bare gate mirror recorded at `remote.no-mistakes.url`.
+It resolves the authoritative default branch from a bounded `origin HEAD` probe first, then local `origin/HEAD`, or local-only unambiguous branch evidence; for repos with an `origin`, it fails closed rather than guessing from `main`, `master`, ancestry, or a lone tracking branch when remote and local `origin/HEAD` evidence is missing or ambiguous.
+After resolving the branch, it refreshes `origin/<default>` in the source repo, seeds the gate mirror's `refs/heads/<default>` and `refs/remotes/origin/<default>`, and points the gate mirror `HEAD` at that branch.
+It prints `ok:` when the mirror is already current, `healed:` when it repaired refs, and an `error:` when the repo is not initialized for no-mistakes, the gate path is missing or non-bare, or the default branch cannot be proven.
+Ship briefs for `no-mistakes` projects tell crewmates to run this helper after `no-mistakes doctor` and before `/no-mistakes`.
+Secondmate seeding also runs it after `no-mistakes init` and `no-mistakes doctor` for newly cloned `no-mistakes` projects, so new secondmate homes do not inherit an empty gate mirror.
+
 ## Captain preferences (data/captain.md)
 
 Personal preferences for one captain's fleet live locally in `data/captain.md`; it is gitignored and printed in the session-start context digest after `data/projects.md` and optional `data/secondmates.md`.
@@ -68,7 +77,7 @@ Use `fm-home-seed.sh <id> - <project>...` to lease a fresh firstmate worktree fo
 The lease is held under the secondmate id until explicit retirement or seed rollback returns it, so normal restarts do not free or recycle the home.
 Teardown of a leased home fails closed if `treehouse return` cannot release the lease; plain-clone homes with no treehouse pool slot are removed directly.
 Secondmate routes cover `no-mistakes` and `direct-PR` projects; `local-only` projects remain main-firstmate work.
-For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
+For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home, verifies or repairs their no-mistakes gate mirror default-branch refs, and refuses to mutate a preexisting clone that is not already initialized.
 After creating a secondmate, move existing main-backlog items that you have judged in-scope with `fm-backlog-handoff.sh <secondmate-id> <item-key>...`; it is idempotent and refuses in-flight items or non-secondmate homes.
 Set `FM_SECONDMATE_CHARTER` to seed from inline charter text when no filled charter brief exists; set `FM_SECONDMATE_SCOPE` when the routing scope should differ from the charter text.
 
@@ -216,6 +225,8 @@ FM_CHECK_TIMEOUT=30     # seconds allowed per slow check script
 FM_CREW_STATE_NM_TIMEOUT=10   # seconds allowed per no-mistakes query inside fm-crew-state.sh
 FM_CREW_STATE_RUNS_LIMIT=200  # recent no-mistakes runs rows scanned when cross-branch attribution falls back from axi status
 FM_CREW_STATE_BIN=bin/fm-crew-state.sh   # test override for the current-state reader used by provably-working watcher triage
+FM_DEFAULT_BRANCH_REMOTE_TIMEOUT=5   # seconds allowed for fm-no-mistakes-default-branch.sh to probe origin HEAD
+FM_DEFAULT_BRANCH_FETCH_TIMEOUT=$FM_DEFAULT_BRANCH_REMOTE_TIMEOUT   # seconds allowed to refresh origin/<default> before gate-mirror repair
 FMX_PAIRING_TOKEN=      # X mode pairing token; .env opt-in authorizes replies and eligible lifecycle actions
 FMX_RELAY_URL=https://myfirstmate.io   # optional X relay override, mainly for local relay development
 FMX_ENV_FILE=           # optional alternate .env file for direct X client invocations; bootstrap still checks $FM_HOME/.env

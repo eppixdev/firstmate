@@ -73,6 +73,8 @@ test_no_mistakes_dod_wording() {
     "no-mistakes DOD lost its guidance-reference sentence"
   assert_no_grep "no-mistakes' own guidance" "$brief" \
     "no-mistakes DOD regressed to the apostrophe form that breaks bash -n"
+  assert_grep "fm-no-mistakes-default-branch.sh ." "$brief" \
+    "no-mistakes setup omitted the gate-mirror default-branch preflight"
   pass "fm-brief.sh: no-mistakes DOD wording avoids the apostrophe regression"
 }
 

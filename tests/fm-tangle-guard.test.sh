@@ -32,6 +32,20 @@ make_repo() {
   printf '%s\n' "$dir"
 }
 
+run_with_timeout() {
+  local limit=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$limit" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$limit" "$@"
+  else
+    "$@"
+  fi
+}
+
 # --- shared lib: branch classification --------------------------------------
 
 # fm_primary_tangle_branch is the whole scoping decision: a NAMED non-default
@@ -58,6 +72,146 @@ ROWS
   out=$(fm_primary_tangle_branch "$TMP_ROOT" || true)
   [ -z "$out" ] || fail "non-git dir wrongly reported a tangle: '$out'"
   pass "fm_primary_tangle_branch: feature branch alarms; default/detached/non-git stay silent"
+}
+
+test_lib_fails_closed_for_ambiguous_remote_default() {
+  local repo origin out
+  repo="$TMP_ROOT/lib-ambiguous-repo"
+  origin="$TMP_ROOT/lib-ambiguous-origin.git"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'develop\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm develop
+  git -C "$repo" branch -M develop
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin develop >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/develop
+  git -C "$repo" checkout -q --orphan main
+  printf 'main\n' > "$repo/MAIN.md"
+  git -C "$repo" add MAIN.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" push -u origin main >/dev/null
+  git -C "$repo" checkout -q develop
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-ambiguous-origin.git"
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "ambiguous origin/HEAD-missing repo should fail closed, got '$out'"
+  pass "fm_default_branch fails closed when origin/HEAD is ambiguous"
+}
+
+test_lib_fails_closed_for_ancestry_only_remote_default() {
+  local repo origin out
+  repo="$TMP_ROOT/lib-linear-repo"
+  origin="$TMP_ROOT/lib-linear-origin.git"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'main\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin main >/dev/null
+  git -C "$repo" checkout -q -b develop
+  printf 'develop\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam develop
+  git -C "$repo" push -u origin develop >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/develop
+  git -C "$repo" checkout -q -b topic
+  printf 'topic\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam topic
+  git -C "$repo" push -u origin topic >/dev/null
+  git -C "$repo" checkout -q develop
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-linear-origin.git"
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "ancestry-only origin/HEAD-missing repo should fail closed, got '$out'"
+  pass "fm_default_branch fails closed when only ancestry suggests a default"
+}
+
+test_lib_fails_closed_for_lone_local_tracking_branch() {
+  local repo origin peer out
+  repo="$TMP_ROOT/lib-lone-local-tracking-repo"
+  origin="$TMP_ROOT/lib-lone-local-tracking-origin.git"
+  peer="$TMP_ROOT/lib-lone-local-tracking-peer"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'main\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin main >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/main
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  git -C "$peer" checkout -q -b topic
+  printf 'topic\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam topic
+  git -C "$peer" push -u origin topic >/dev/null
+  git -C "$repo" fetch -q origin topic
+  git -C "$repo" checkout -q --detach
+  git -C "$repo" checkout -q -b topic origin/topic
+  git -C "$repo" branch -D main >/dev/null
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" remote set-url origin "$TMP_ROOT/missing-lone-local-origin.git"
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "lone local tracking branch origin/HEAD-missing repo should fail closed, got '$out'"
+  pass "fm_default_branch fails closed when only a local topic branch tracks origin"
+}
+
+test_lib_stays_local_only_when_origin_is_unreachable() {
+  local repo out rc
+  repo="$TMP_ROOT/lib-unreachable-origin-repo"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  git -C "$repo" commit -q --allow-empty -m init
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin ssh://203.0.113.1/does/not/exist.git
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+
+  # shellcheck disable=SC2016  # $1 and $2 are positional parameters for the inner shell.
+  out=$(run_with_timeout 2 bash -lc '. "$1/bin/fm-tangle-lib.sh"; fm_default_branch "$2" || true' _ "$ROOT" "$repo")
+  rc=$?
+  [ "$rc" = "0" ] || fail "origin/HEAD-missing unreachable origin should not block local default-branch resolution (rc=$rc)"
+  [ -z "$out" ] || fail "origin/HEAD-missing unreachable origin should fail closed, got '$out'"
+  pass "fm_default_branch stays local-only when origin is unreachable"
+}
+
+test_tangle_detection_uses_local_main_when_origin_head_missing() {
+  local repo origin out
+  repo="$TMP_ROOT/lib-missing-origin-head-tangle-repo"
+  origin="$TMP_ROOT/lib-missing-origin-head-tangle-origin.git"
+  git init --bare -q "$origin"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Firstmate Tests'
+  git -C "$repo" config user.email 'tests@example.invalid'
+  printf 'main\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm main
+  git -C "$repo" branch -M main
+  git -C "$repo" remote add origin "$origin"
+  git -C "$repo" push -u origin main >/dev/null
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git -C "$repo" checkout -q -B fm/missing-origin-head
+
+  out=$(fm_default_branch "$repo" || true)
+  [ -z "$out" ] || fail "strict default resolver should still fail closed without origin/HEAD, got '$out'"
+  out=$(fm_primary_tangle_branch "$repo" || true)
+  [ "$out" = "fm/missing-origin-head" ] \
+    || fail "tangle detection missed feature branch when origin/HEAD was missing, got '$out'"
+  pass "fm_primary_tangle_branch detects tangle when origin/HEAD is missing"
 }
 
 # --- GUARD 2a: fm-guard banner ----------------------------------------------
@@ -215,6 +369,11 @@ test_spawn_isolation_abort() {
 }
 
 test_lib_classification
+test_lib_fails_closed_for_ambiguous_remote_default
+test_lib_fails_closed_for_ancestry_only_remote_default
+test_lib_fails_closed_for_lone_local_tracking_branch
+test_lib_stays_local_only_when_origin_is_unreachable
+test_tangle_detection_uses_local_main_when_origin_head_missing
 test_guard_banner
 test_bootstrap_line
 test_brief_assertion_precedes_branch

@@ -14,13 +14,71 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 LOCK="$STATE/.lock"
 mkdir -p "$STATE"
 
-# Known harness command names; extend when a new adapter is verified.
-
-harness_token_is_verified() {
-  case "$(basename -- "$1")" in
-    claude|codex|opencode|grok|pi) return 0 ;;
+harness_component_name() {
+  local name=$1
+  local bare=${name#.}
+  case "$name" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "$name"
+      return 0
+      ;;
+  esac
+  case "$bare" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "$bare"
+      return 0
+      ;;
+  esac
+  case "${name%.*}" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "${name%.*}"
+      return 0
+      ;;
+  esac
+  case "${bare%.*}" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "${bare%.*}"
+      return 0
+      ;;
+  esac
+  case "$name" in
+    claude[-_.]*)
+      printf '%s\n' claude
+      return 0
+      ;;
+    codex[-_.]*)
+      printf '%s\n' codex
+      return 0
+      ;;
+    opencode[-_.]*)
+      printf '%s\n' opencode
+      return 0
+      ;;
+    grok[-_.]*)
+      printf '%s\n' grok
+      return 0
+      ;;
   esac
   return 1
+}
+
+# Known harness command names; extend when a new adapter is verified.
+
+harness_token_name() {
+  local token=$1 name
+  name=$(basename -- "$token")
+  harness_component_name "$name" && return 0
+  while [ "$token" != "${token%/*}" ]; do
+    token=${token%/*}
+    name=$(basename -- "$token")
+    harness_component_name "$name" && return 0
+  done
+  harness_component_name "$token" && return 0
+  return 1
+}
+
+harness_token_is_verified() {
+  harness_token_name "$1" >/dev/null
 }
 
 args_command_base() {

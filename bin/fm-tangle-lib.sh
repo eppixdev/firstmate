@@ -17,17 +17,48 @@
 # default branch. Detached HEAD on the default is fine; a feature branch in a
 # primary checkout is the alarm.
 
-# Resolve the default branch name of the git repo at <dir>: prefer origin/HEAD,
-# then fall back to a local main/master. Echoes the name, or returns 1.
+# Resolve the default branch name of the git repo at <dir>: prefer the local
+# origin/HEAD tracking ref, then fall back only for local-only repos where
+# branch evidence is still authoritative. Echoes the name, or returns 1.
 fm_default_branch() {
-  local dir=$1 ref branch
+  local dir=$1 ref branch locals remotes has_origin
+  local local_count remote_count
   ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
+  has_origin=0
+  if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    has_origin=1
+  fi
+  remotes=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/origin \
+    | grep -v '^origin/HEAD$' || true)
+  remote_count=$(printf '%s\n' "$remotes" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$has_origin" = "1" ] || [ "$remote_count" != "0" ]; then
+    return 1
+  fi
+  locals=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads)
+  local_count=$(printf '%s\n' "$locals" | sed '/^$/d' | wc -l | tr -d ' ')
   for branch in main master; do
     if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
+  if [ "$local_count" = "1" ]; then
+    printf '%s\n' "$locals" | sed -n '/./{p;q;}'
+    return 0
+  fi
+  return 1
+}
+
+fm_tangle_default_branch() {
+  local dir=$1 branch
+  fm_default_branch "$dir" 2>/dev/null && return 0
+  for branch in main master; do
+    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" \
+      || git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
       printf '%s\n' "$branch"
       return 0
     fi
@@ -46,7 +77,7 @@ fm_primary_tangle_branch() {
   git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   cur=$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   [ -n "$cur" ] || return 1
-  default=$(fm_default_branch "$root") || return 1
+  default=$(fm_tangle_default_branch "$root") || return 1
   [ "$cur" = "$default" ] && return 1
   printf '%s\n' "$cur"
   return 0

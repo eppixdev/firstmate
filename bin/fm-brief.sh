@@ -199,7 +199,8 @@ EOF
     ;;
   *)  # no-mistakes (default)
     SETUP2="
-2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
+2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`.
+3. Run \`$FM_ROOT/bin/fm-no-mistakes-default-branch.sh .\` so the internal no-mistakes gate mirror has the default-branch refs before /no-mistakes."
     RULE1='1. Never push to the default branch. Never merge a PR.'
     DOD=$(cat <<EOF
 # Definition of done

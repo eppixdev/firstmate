@@ -409,8 +409,9 @@ while :; do
     exit 0
   fi
 
-  # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
-  # alive. Supervision scripts warn when this goes stale with tasks in flight.
+  # Liveness beacon for fm-guard.sh: the owned pid/path/home record plus a fresh
+  # mtime prove this watcher is alive. Supervision scripts warn when this goes
+  # stale or no longer matches the recorded watcher with tasks in flight.
   fm_watcher_beat_write "$STATE/.last-watcher-beat" "$WATCHER_PID" "$WATCH_PATH" "$FM_HOME" || true
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).

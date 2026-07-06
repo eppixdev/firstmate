@@ -15,7 +15,8 @@ set -u
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 TMP_ROOT=$(fm_test_tmproot fm-bootstrap-tests)
-require_command jq "jq is required for dispatch profile validation tests"
+HAVE_JQ=0
+command -v jq >/dev/null 2>&1 && HAVE_JQ=1
 
 # A fake toolchain where every required tool is present and gh is authenticated.
 # treehouse's `get --help` advertises --lease only when FM_FAKE_TREEHOUSE_LEASE_HELP=1.
@@ -230,5 +231,9 @@ ROWS
 test_bootstrap_reporting
 test_no_mistakes_min_version
 test_orca_backend_gates_orca_tool_only_when_selected
-test_crew_dispatch_active_rules_are_surfaced
-test_crew_dispatch_validation
+if [ "$HAVE_JQ" -eq 1 ]; then
+  test_crew_dispatch_active_rules_are_surfaced
+  test_crew_dispatch_validation
+else
+  pass "bootstrap dispatch profile validation skipped without jq"
+fi

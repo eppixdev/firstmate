@@ -425,10 +425,11 @@ For `local-only`, create the local repo under `projects/<name>` and skip GitHub 
 **Initialize (`no-mistakes` mode only):**
 
 ```sh
-cd projects/<name> && no-mistakes init && no-mistakes doctor
+cd projects/<name> && no-mistakes init && no-mistakes doctor && ../../bin/fm-no-mistakes-default-branch.sh .
 ```
 
 `no-mistakes init` sets up the local gate: a bare repo plus post-receive hook, the `no-mistakes` git remote, and a database record for the repo (it needs an `origin` remote).
+`fm-no-mistakes-default-branch.sh` verifies or repairs that gate mirror's default-branch refs before any validation can compare review scope against it.
 It does **not** vendor any skill into the project - the no-mistakes skill is user-level now, available to every crewmate without a per-project copy.
 So init produces nothing to commit; it is a sanctioned exception to the never-write rule (section 1) only in that it runs git remote/config setup inside the project.
 Touch nothing else.
@@ -565,6 +566,7 @@ Load `harness-adapters` for the target harness's skill invocation form; natural 
 
 The crewmate drives the no-mistakes pipeline (review, test, document, lint, push, PR, CI) itself.
 The ship brief intentionally does not restate no-mistakes gate mechanics; it points the crewmate to the version-matched SKILL.md loaded by `/no-mistakes`, `no-mistakes axi run --help`, and per-response `help` lines.
+The one firstmate setup invariant it does enforce is `bin/fm-no-mistakes-default-branch.sh .` after `no-mistakes doctor` and before `/no-mistakes`, so the local no-mistakes gate mirror has proven default-branch refs instead of letting review scope fall back from an empty or stale mirror.
 Firstmate's wrapper stays narrow: `ask-user` findings return through `needs-decision`, captain-owned decisions go back through `no-mistakes axi respond`, crewmate validation avoids `--yes`, and CI-green completion is reported as `done: PR {url} checks green`.
 Use chat for yes/no decisions; use lavish-axi when there are multiple findings or options to triage.
 

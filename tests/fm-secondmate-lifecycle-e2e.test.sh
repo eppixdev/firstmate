@@ -14,8 +14,9 @@
 #   - registry line records scope (from a filled charter brief) and project list
 #   - charter is copied into the subhome
 #   - remote-backed projects are cloned with their origin URL preserved
-#   - a no-mistakes project is initialized (init + doctor) in the NEW subhome clone
-#     and the parent project clone is never mutated (no write through a project)
+#   - a no-mistakes project is initialized (init + doctor), then its empty gate
+#     mirror is repaired to carry main and origin/main in the NEW subhome clone
+#     while the parent project clone is never mutated (no write through a project)
 #   - spawn meta records kind=secondmate, home=, and the project list; launch runs
 #     in the subhome with the persistent charter and cleared operational overrides
 #   - a bare `fm-<id>` send targets the window recorded in THIS home's meta
@@ -38,6 +39,7 @@ LOG="$TMP_ROOT/tmux.log"
 PANE="$TMP_ROOT/pane.txt"
 ALPHA_ORIGIN=
 BETA_ORIGIN=
+NM_GATES=
 
 # --- shared world + seed ----------------------------------------------------
 setup_world() {
@@ -45,6 +47,9 @@ setup_world() {
   fm_git_init_commit "$HOME_DIR/projects/alpha"
   fm_git_init_commit "$HOME_DIR/projects/beta"
   fm_git_init_commit "$HOME_DIR/projects/gamma"
+  git -C "$HOME_DIR/projects/alpha" branch -M main
+  git -C "$HOME_DIR/projects/beta" branch -M main
+  git -C "$HOME_DIR/projects/gamma" branch -M main
   fm_git_add_origin "$HOME_DIR/projects/alpha" "$TMP_ROOT/remotes/alpha.git"
   fm_git_add_origin "$HOME_DIR/projects/beta" "$TMP_ROOT/remotes/beta.git"
   fm_git_add_origin "$HOME_DIR/projects/gamma" "$TMP_ROOT/remotes/gamma.git"
@@ -59,6 +64,7 @@ EOF
   # One combined fakebin: tmux + treehouse (spawn/send/teardown) and no-mistakes
   # (gamma initialization during seed).
   FAKEBIN=$(make_fake_tmux "$TMP_ROOT/fake")
+  NM_GATES="$TMP_ROOT/fake/no-mistakes-gates"
   make_fake_no_mistakes "$TMP_ROOT/fake" >/dev/null
 
   # A filled charter brief whose routing scope differs from the charter summary,
@@ -71,6 +77,7 @@ EOF
 phase_seed() {
   local out
   out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" \
+    FM_FAKE_NO_MISTAKES_ROOT="$NM_GATES" \
     "$ROOT/bin/fm-home-seed.sh" design "$SUB" alpha beta gamma) \
     || fail "seed failed"
   SUB_ABS=$(cd "$SUB" && pwd -P)
@@ -93,6 +100,10 @@ phase_seed() {
   assert_present "$SUB/projects/gamma/.no-mistakes-init" "no-mistakes project was not initialized in the subhome"
   assert_present "$SUB/projects/gamma/.no-mistakes-doctor" "no-mistakes project was not doctored in the subhome"
   assert_absent "$HOME_DIR/projects/gamma/.no-mistakes-init" "seed wrote no-mistakes state through the parent project"
+  [ "$(git --git-dir="$NM_GATES/gamma.git" rev-parse refs/heads/main)" = "$(git -C "$SUB/projects/gamma" rev-parse origin/main)" ] \
+    || fail "seed did not repair the no-mistakes gate repo's main ref"
+  [ "$(git --git-dir="$NM_GATES/gamma.git" rev-parse refs/remotes/origin/main)" = "$(git -C "$SUB/projects/gamma" rev-parse origin/main)" ] \
+    || fail "seed did not repair the no-mistakes gate repo's origin/main ref"
 
   # Registry line: scope from the filled brief, project list, no legacy owns field.
   assert_grep '- design - customer onboarding charter' "$HOME_DIR/data/secondmates.md" "registry summary not from the charter"

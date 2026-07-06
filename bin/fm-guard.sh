@@ -37,7 +37,7 @@ case "$READ_ONLY" in 1|true|TRUE|yes|YES) READ_ONLY=1 ;; *) READ_ONLY=0 ;; esac
 # only: detached HEAD (linked worktrees, secondmate homes) never trips this.
 tangle_branch=$(fm_primary_tangle_branch "$FM_ROOT" || true)
 if [ -n "$tangle_branch" ]; then
-  tangle_default=$(fm_default_branch "$FM_ROOT" 2>/dev/null || echo main)
+  tangle_default=$(fm_tangle_default_branch "$FM_ROOT" 2>/dev/null || echo main)
   trule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   {
     printf '●%s\n' "$trule"
@@ -74,8 +74,9 @@ done
 
 [ -s "$FM_WAKE_QUEUE" ] && queue_pending=true
 
-# Resolve the watcher's liveness from its beacon: fresh within GRACE means a
-# watcher is alive and we stay quiet about it.
+# Resolve the watcher's liveness from its owned beacon: matching pid/path/home
+# metadata plus freshness within GRACE means the recorded watcher is alive and we
+# stay quiet about it.
 BEAT="$STATE/.last-watcher-beat"
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"

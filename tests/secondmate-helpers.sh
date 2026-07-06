@@ -96,7 +96,9 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-# A fake no-mistakes that touches .no-mistakes-init / .no-mistakes-doctor markers.
+# A fake no-mistakes that records init/doctor markers and creates the local
+# gate mirror shape firstmate expects, but deliberately leaves it missing the
+# default-branch refs so tests can verify firstmate repairs that state.
 make_fake_no_mistakes() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
@@ -104,7 +106,14 @@ make_fake_no_mistakes() {
 #!/usr/bin/env bash
 set -eu
 case "${1:-}" in
-  init) touch .no-mistakes-init ;;
+  init)
+    root=${FM_FAKE_NO_MISTAKES_ROOT:?FM_FAKE_NO_MISTAKES_ROOT is required}
+    gate="$root/$(basename "$PWD").git"
+    mkdir -p "$root"
+    git init --bare -q "$gate"
+    git remote add no-mistakes "$gate"
+    touch .no-mistakes-init
+    ;;
   doctor) touch .no-mistakes-doctor ;;
   *) exit 2 ;;
 esac

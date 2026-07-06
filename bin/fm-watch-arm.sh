@@ -87,6 +87,27 @@ healthy_watcher() {
   return 0
 }
 
+legacy_healthy_watcher() {
+  local pid age beat_pid beat_identity beat_path beat_home
+  HEALTHY_PID=
+  pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+  fm_pid_alive "$pid" || return 1
+  watch_lock_matches_pid "$pid" || return 1
+  [ -e "$BEAT" ] || return 1
+  beat_pid=$(fm_watcher_beat_value "$BEAT" pid)
+  beat_identity=$(fm_watcher_beat_value "$BEAT" 'pid-identity')
+  beat_path=$(fm_watcher_beat_value "$BEAT" 'watcher-path')
+  beat_home=$(fm_watcher_beat_value "$BEAT" 'fm-home')
+  [ -z "$beat_pid" ] || return 1
+  [ -z "$beat_identity" ] || return 1
+  [ -z "$beat_path" ] || return 1
+  [ -z "$beat_home" ] || return 1
+  age=$(fm_path_age "$BEAT")
+  [ "$age" -lt "$GRACE" ] || return 1
+  HEALTHY_PID=$pid
+  return 0
+}
+
 report_healthy() {
   local age
   age=$(fm_path_age "$BEAT")
@@ -138,7 +159,7 @@ fi
 # If a genuinely live+fresh watcher already holds the lock, do not start a second
 # one - the singleton would no-op anyway. Report it honestly and return success.
 # (--restart skips this: it just stopped this home's watcher and wants a fresh one.)
-if [ "$mode" = arm ] && healthy_watcher; then
+if [ "$mode" = arm ] && { healthy_watcher || legacy_healthy_watcher; }; then
   report_healthy
   exit 0
 fi
@@ -186,6 +207,12 @@ while :; do
       exit "$rc"
     fi
     # Another watcher won the singleton; our child stood down. Report the live one.
+    report_healthy
+    wait "$child" 2>/dev/null || true
+    rm -f "$child_out" 2>/dev/null || true
+    exit 0
+  fi
+  if legacy_healthy_watcher && [ "$HEALTHY_PID" != "$child" ]; then
     report_healthy
     wait "$child" 2>/dev/null || true
     rm -f "$child_out" 2>/dev/null || true
