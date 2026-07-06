@@ -56,7 +56,7 @@ REPO=${1:-.}
 
 git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { echo "error: $REPO is not a git work tree" >&2; exit 1; }
-REPO_ROOT=$(git -C "$REPO" rev-parse --show-toplevel)
+WORKTREE_ROOT=$(git -C "$REPO" rev-parse --show-toplevel)
 
 DEFAULT=$(fm_default_branch "$REPO" 2>/dev/null || true)
 if [ -z "$DEFAULT" ] && git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
@@ -83,7 +83,7 @@ case "$GATE_URL" in
   file://*) GATE_DIR=${GATE_URL#file://} ;;
   /*) GATE_DIR=$GATE_URL ;;
   *)
-    GATE_DIR=$(cd "$REPO_ROOT" && cd "$GATE_URL" 2>/dev/null && pwd -P) \
+    GATE_DIR=$(cd "$WORKTREE_ROOT" && cd "$GATE_URL" 2>/dev/null && pwd -P) \
       || { echo "error: no-mistakes gate repo is missing or invalid: $GATE_URL" >&2; exit 1; }
     ;;
 esac
@@ -106,7 +106,7 @@ if [ "$HEAD_SHA" = "$TARGET_SHA" ] \
   exit 0
 fi
 
-git --git-dir="$GATE_DIR" fetch --quiet "$REPO_ROOT" "$SOURCE_REF:$HEAD_REF"
+git --git-dir="$GATE_DIR" fetch --quiet "$WORKTREE_ROOT" "$SOURCE_REF:$HEAD_REF"
 git --git-dir="$GATE_DIR" update-ref "$REMOTE_REF" "$TARGET_SHA"
 git --git-dir="$GATE_DIR" symbolic-ref HEAD "$HEAD_REF"
 printf 'healed: seeded no-mistakes gate mirror %s, origin/%s, and HEAD at %s from %s\n' \

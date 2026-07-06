@@ -325,6 +325,34 @@ test_resolves_relative_gate_paths_from_subdirectories() {
   pass "fm-no-mistakes-default-branch resolves relative gate paths from subdirectories"
 }
 
+test_resolves_relative_gate_paths_from_linked_worktrees() {
+  local fixture repo origin gate_root gate_worktree worktrees worktree out expected
+  fixture="$TMP_ROOT/relative-gate-worktree-fixture"
+  repo="$fixture/repo"
+  origin="$fixture/origin.git"
+  gate_root="$fixture/gate.git"
+  gate_worktree="$fixture/worktrees/gate.git"
+  worktrees="$fixture/worktrees"
+  worktree="$worktrees/task"
+  mkdir -p "$worktrees"
+  make_repo_with_origin "$repo" "$origin"
+  git init --bare -q "$gate_root"
+  git init --bare -q "$gate_worktree"
+  git -C "$repo" remote add no-mistakes ../gate.git
+  git -C "$repo" worktree add -q "$worktree" -b topic
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$worktree") || fail "default-branch repair failed from a linked worktree"
+  expected=$(git -C "$worktree" rev-parse origin/main)
+  [ "$(git --git-dir="$gate_worktree" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "repair did not seed the linked worktree's relative gate path"
+  if git --git-dir="$gate_root" show-ref --verify --quiet refs/heads/main; then
+    fail "repair incorrectly seeded the primary checkout's sibling gate path"
+  fi
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror main, origin/main, and HEAD" \
+    "repair did not report the linked-worktree relative-path self-heal"
+  pass "fm-no-mistakes-default-branch resolves relative gate paths from linked worktrees"
+}
+
 test_refreshes_stale_remote_default_before_repair() {
   local repo peer origin gate out expected stale
   repo="$TMP_ROOT/repo-stale-origin-main"
@@ -385,5 +413,6 @@ test_fails_closed_for_ancestry_only_default_guess
 test_fails_closed_when_origin_head_is_ambiguous
 test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories
+test_resolves_relative_gate_paths_from_linked_worktrees
 test_refreshes_stale_remote_default_before_repair
 test_rejects_non_bare_gate_repo
