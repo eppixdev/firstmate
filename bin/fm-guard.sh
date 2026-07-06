@@ -74,8 +74,9 @@ done
 
 [ -s "$FM_WAKE_QUEUE" ] && queue_pending=true
 
-# Resolve the watcher's liveness from its beacon: fresh within GRACE means a
-# watcher is alive and we stay quiet about it.
+# Resolve the watcher's liveness from its owned beacon: matching pid/path/home
+# metadata plus freshness within GRACE means the recorded watcher is alive and we
+# stay quiet about it.
 BEAT="$STATE/.last-watcher-beat"
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
