@@ -67,7 +67,7 @@ fi
 
 SOURCE_REF=
 if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
-  git -C "$REPO" fetch --quiet origin "refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 \
+  git -C "$REPO" fetch --quiet origin "+refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 \
     || { echo "error: unable to refresh origin/$DEFAULT in $REPO before repairing the no-mistakes gate mirror" >&2; exit 1; }
   SOURCE_REF="refs/remotes/origin/$DEFAULT"
 elif git -C "$REPO" rev-parse --verify --quiet "refs/heads/$DEFAULT^{commit}" >/dev/null; then
@@ -106,7 +106,7 @@ if [ "$HEAD_SHA" = "$TARGET_SHA" ] \
   exit 0
 fi
 
-git --git-dir="$GATE_DIR" fetch --quiet "$WORKTREE_ROOT" "$SOURCE_REF:$HEAD_REF"
+git --git-dir="$GATE_DIR" fetch --quiet "$WORKTREE_ROOT" "+$SOURCE_REF:$HEAD_REF"
 git --git-dir="$GATE_DIR" update-ref "$REMOTE_REF" "$TARGET_SHA"
 git --git-dir="$GATE_DIR" symbolic-ref HEAD "$HEAD_REF"
 printf 'healed: seeded no-mistakes gate mirror %s, origin/%s, and HEAD at %s from %s\n' \

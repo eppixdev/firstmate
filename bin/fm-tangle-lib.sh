@@ -53,6 +53,19 @@ fm_default_branch() {
   return 1
 }
 
+fm_tangle_default_branch() {
+  local dir=$1 branch
+  fm_default_branch "$dir" 2>/dev/null && return 0
+  for branch in main master; do
+    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" \
+      || git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # If the git checkout at <root> is tangled - on a NAMED branch that is not its
 # default branch - echo the offending branch name and return 0. For every healthy
 # state (not a git work tree, detached HEAD, or already on the default branch)
@@ -64,7 +77,7 @@ fm_primary_tangle_branch() {
   git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   cur=$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   [ -n "$cur" ] || return 1
-  default=$(fm_default_branch "$root") || return 1
+  default=$(fm_tangle_default_branch "$root") || return 1
   [ "$cur" = "$default" ] && return 1
   printf '%s\n' "$cur"
   return 0

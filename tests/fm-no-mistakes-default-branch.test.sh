@@ -383,6 +383,39 @@ test_refreshes_stale_remote_default_before_repair() {
   pass "fm-no-mistakes-default-branch refreshes origin/main before repair"
 }
 
+test_repairs_divergent_gate_refs() {
+  local repo origin gate out expected stale
+  repo="$TMP_ROOT/repo-divergent-gate"
+  origin="$TMP_ROOT/origin-divergent-gate.git"
+  gate="$TMP_ROOT/gate-divergent-gate.git"
+  make_repo_with_origin "$repo" "$origin"
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  expected=$(git -C "$repo" rev-parse origin/main)
+  git --git-dir="$gate" fetch --quiet "$repo" "refs/remotes/origin/main:refs/heads/main"
+  git --git-dir="$gate" update-ref refs/remotes/origin/main "$expected"
+  git -C "$repo" checkout -q --orphan replacement
+  printf 'replacement\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm replacement
+  git -C "$repo" branch -M main
+  git -C "$repo" push --force origin main >/dev/null
+  stale="$expected"
+  expected=$(git --git-dir="$origin" rev-parse refs/heads/main)
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed for divergent gate refs"
+  [ "$stale" != "$expected" ] || fail "test fixture did not create a divergent replacement default"
+  [ "$(git -C "$repo" rev-parse origin/main)" = "$expected" ] \
+    || fail "repair did not force-refresh source origin/main"
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "repair did not force-replace divergent gate refs/heads/main"
+  [ "$(git --git-dir="$gate" rev-parse refs/remotes/origin/main)" = "$expected" ] \
+    || fail "repair did not update divergent gate refs/remotes/origin/main"
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror main, origin/main, and HEAD" \
+    "repair did not report the divergent self-heal"
+  pass "fm-no-mistakes-default-branch repairs divergent gate refs"
+}
+
 test_rejects_non_bare_gate_repo() {
   local repo origin gate err
   repo="$TMP_ROOT/repo-non-bare-gate"
@@ -415,4 +448,5 @@ test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories
 test_resolves_relative_gate_paths_from_linked_worktrees
 test_refreshes_stale_remote_default_before_repair
+test_repairs_divergent_gate_refs
 test_rejects_non_bare_gate_repo
