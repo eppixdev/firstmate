@@ -94,6 +94,28 @@ test_live_stale_watch_lock_is_actionable() {
   pass "live watcher lock with stale heartbeat is actionable"
 }
 
+test_session_lock_detects_node_hosted_claude_code_wrapper() {
+  local dir state fakebin out status
+  dir=$(make_case session-lock-claude-code)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/lock.out"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+case "$2" in
+  comm=) printf 'node\n' ;;
+  args=) printf 'node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js\n' ;;
+  ppid=) printf '1\n' ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  status=0
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-lock.sh" > "$out" 2>&1 || status=$?
+  [ "$status" -eq 0 ] || fail "fm-lock did not detect node-hosted claude-code wrapper: $(cat "$out")"
+  grep -F 'lock acquired: harness pid ' "$out" >/dev/null || fail "fm-lock did not report the acquired harness pid"
+  pass "session lock detects a node-hosted claude-code wrapper"
+}
+
 test_guard_warnings() {
   # The guard's three operator-visible states, with resilient substrings instead
   # of copy-coupled tests:
@@ -794,6 +816,7 @@ test_arm_fails_loud_when_no_fresh_watcher_confirmable() {
 test_singleton_start
 test_stale_watch_lock_reclaimed
 test_live_stale_watch_lock_is_actionable
+test_session_lock_detects_node_hosted_claude_code_wrapper
 test_guard_warnings
 test_lock_single_winner_under_concurrency
 test_lock_steals_dead_pid_lock
