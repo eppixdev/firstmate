@@ -181,6 +181,7 @@ test_lib_stays_local_only_when_origin_is_unreachable() {
   git -C "$repo" remote add origin ssh://203.0.113.1/does/not/exist.git
   git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
 
+  # shellcheck disable=SC2016  # $1 and $2 are positional parameters for the inner shell.
   out=$(run_with_timeout 2 bash -lc '. "$1/bin/fm-tangle-lib.sh"; fm_default_branch "$2" || true' _ "$ROOT" "$repo")
   rc=$?
   [ "$rc" = "0" ] || fail "origin/HEAD-missing unreachable origin should not block local default-branch resolution (rc=$rc)"
