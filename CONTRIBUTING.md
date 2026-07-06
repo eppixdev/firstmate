@@ -67,7 +67,7 @@ for script in bin/*.sh bin/backends/*.sh; do bash -n "$script"; done   # syntax-
 shellcheck bin/*.sh bin/backends/*.sh tests/*.sh   # lint the toolbelt and behavior tests; CI enforces this
 for test_script in tests/*.test.sh; do bash "$test_script"; done   # behavior tests, matching CI and no-mistakes commands.test
 tests/fm-wake-queue.test.sh               # durable wake queue losslessness, catch-up, double-drain, duplicate-collapse, and drain liveness guard tests
-tests/fm-watcher-lock.test.sh             # watcher singleton, lock-race, watch-arm liveness, and guard-warning tests
+tests/fm-watcher-lock.test.sh             # watcher singleton, lock-race, owned beacon, watch-arm liveness/wake-status, and guard-warning tests
 tests/fm-watch-triage.test.sh             # always-on watcher triage: benign absorb, actionable surface, stale status-log override, wedge threshold, heartbeat backstop, and afk one-shot coherence
 tests/fm-daemon.test.sh                   # sub-supervisor classifier, /afk presence-gating, max-defer, composer, and fm-send submit tests
 tests/fm-send-settle.test.sh              # fm-send post-submit settle pause, tuning, disable, and --key bypass tests
@@ -77,12 +77,13 @@ tests/fm-wake-daemon-lifecycle-e2e.test.sh # watcher + daemon lifecycle e2e: res
 tests/fm-composer-ghost.test.sh           # dim-ghost stripping, ghost-only composer detection, and escape-free peek tests
 tests/fm-afk-inject-e2e.test.sh           # private-socket end-to-end test of the afk injection path (partial-input deferral, swallowed-Enter retry)
 tests/fm-bootstrap.test.sh                # bootstrap dependency, feature-probe, and crew-dispatch reporting tests
-tests/fm-session-start.test.sh            # fm-session-start.sh: ABSENT vs empty-vs-present digest files, lock-refusal read-only path skipping every mutating step, diagnostics-first section ordering, status-tail bounding, tmux/herdr/zellij endpoint liveness, and composition of the real fm-lock/fm-bootstrap/fm-wake-drain scripts
+tests/fm-session-start.test.sh            # fm-session-start.sh: ABSENT vs empty-vs-present digest files, harness-ancestry lock detection, lock-refusal read-only path skipping every mutating step, diagnostics-first section ordering, status-tail bounding, tmux/herdr/zellij endpoint liveness, and composition of the real fm-lock/fm-bootstrap/fm-wake-drain scripts
+tests/fm-no-mistakes-default-branch.test.sh # no-mistakes gate mirror default-branch repair: missing, stale, divergent, relative-path, non-main, and fail-closed default refs
 tests/fm-grok-harness.test.sh             # grok adapter spawn hook, token guard, teardown cleanup, and session-lock detection tests
 tests/fm-fleet-sync.test.sh               # project clone refresh: safe detached recovery, STUCK drift reports, benign skips, and bootstrap relay
 tests/fm-x-mode.test.sh                   # X-mode poll, inbox context round-trip, reply threading, dismiss, completion follow-up counters/caps, dry-run preview, and .env-presence activation tests
-tests/fm-tangle-guard.test.sh             # primary-checkout tangle detection, read-only remediation suppression, and spawn/brief isolation tests
-tests/fm-brief.test.sh                    # fm-brief.sh bash -n parse regression guard (issue #166) and clean no-mistakes/direct-PR/local-only brief generation tests
+tests/fm-tangle-guard.test.sh             # primary-checkout tangle detection, strict default-branch resolution, read-only remediation suppression, and spawn/brief isolation tests
+tests/fm-brief.test.sh                    # fm-brief.sh bash -n parse regression guard (issue #166), no-mistakes gate preflight, and clean no-mistakes/direct-PR/local-only brief generation tests
 tests/fm-spawn-batch.test.sh              # batch dispatch and FM_HOME project-path scoping tests
 tests/fm-spawn-dispatch-profile.test.sh   # concrete dispatch profile flags: active-profile backstop, harness/model/effort meta, launch templates, batch forwarding, and secondmate exemption
 tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip-safety tests
