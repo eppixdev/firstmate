@@ -68,7 +68,7 @@ Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
 
 `fm-tangle-lib.sh` resolves the default branch from local `origin/HEAD`.
 When a repo has no `origin` evidence, it can fall back to local-only `main`, `master`, or a single local branch; when origin evidence exists but `origin/HEAD` is absent, it refuses to guess.
-That same conservative resolver is used by the no-mistakes gate-mirror repair helper before validation, so a missing default branch fails loudly instead of silently comparing review scope against the wrong base.
+The no-mistakes gate-mirror repair helper is even stricter for remote projects: it probes `origin HEAD` first to avoid stale local `origin/HEAD`, then falls back to the conservative resolver, so a missing default branch fails loudly instead of silently comparing review scope against the wrong base.
 With the default branch resolved, the tangle check classifies a named non-default primary branch as the tangle.
 `fm-guard.sh` prints the repair command on the next mutable fleet action, while `bin/fm-session-start.sh` reports the same condition through bootstrap as a `TANGLE:` line at session start.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to read-only wording with no repair command.

@@ -425,10 +425,11 @@ For `local-only`, create the local repo under `projects/<name>` and skip GitHub 
 **Initialize (`no-mistakes` mode only):**
 
 ```sh
-cd projects/<name> && no-mistakes init && no-mistakes doctor
+cd projects/<name> && no-mistakes init && no-mistakes doctor && ../../bin/fm-no-mistakes-default-branch.sh .
 ```
 
 `no-mistakes init` sets up the local gate: a bare repo plus post-receive hook, the `no-mistakes` git remote, and a database record for the repo (it needs an `origin` remote).
+`fm-no-mistakes-default-branch.sh` verifies or repairs that gate mirror's default-branch refs before any validation can compare review scope against it.
 It does **not** vendor any skill into the project - the no-mistakes skill is user-level now, available to every crewmate without a per-project copy.
 So init produces nothing to commit; it is a sanctioned exception to the never-write rule (section 1) only in that it runs git remote/config setup inside the project.
 Touch nothing else.

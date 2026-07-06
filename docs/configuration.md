@@ -53,7 +53,7 @@ It intentionally mirrors the behavior-test baseline in [`.github/workflows/ci.ym
 ## no-mistakes gate mirror defaults
 
 `bin/fm-no-mistakes-default-branch.sh [repo]` verifies or repairs the local bare gate mirror recorded at `remote.no-mistakes.url`.
-It resolves the authoritative default branch from local `origin/HEAD`, then a bounded `origin HEAD` probe, or local-only unambiguous branch evidence; for repos with an `origin`, it fails closed rather than guessing from `main`, `master`, ancestry, or a lone tracking branch when `origin/HEAD` is missing or ambiguous.
+It resolves the authoritative default branch from a bounded `origin HEAD` probe first, then local `origin/HEAD`, or local-only unambiguous branch evidence; for repos with an `origin`, it fails closed rather than guessing from `main`, `master`, ancestry, or a lone tracking branch when remote and local `origin/HEAD` evidence is missing or ambiguous.
 After resolving the branch, it refreshes `origin/<default>` in the source repo, seeds the gate mirror's `refs/heads/<default>` and `refs/remotes/origin/<default>`, and points the gate mirror `HEAD` at that branch.
 It prints `ok:` when the mirror is already current, `healed:` when it repaired refs, and an `error:` when the repo is not initialized for no-mistakes, the gate path is missing or non-bare, or the default branch cannot be proven.
 Ship briefs for `no-mistakes` projects tell crewmates to run this helper after `no-mistakes doctor` and before `/no-mistakes`.
