@@ -86,7 +86,8 @@ fi
 
 SOURCE_REF=
 if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
-  git -C "$REPO" fetch --quiet origin "+refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 \
+  run_git_probe "${FM_DEFAULT_BRANCH_FETCH_TIMEOUT:-${FM_DEFAULT_BRANCH_REMOTE_TIMEOUT:-5}}" \
+    git -C "$REPO" fetch --quiet origin "+refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" >/dev/null 2>&1 \
     || { echo "error: unable to refresh origin/$DEFAULT in $REPO before repairing the no-mistakes gate mirror" >&2; exit 1; }
   SOURCE_REF="refs/remotes/origin/$DEFAULT"
 elif git -C "$REPO" rev-parse --verify --quiet "refs/heads/$DEFAULT^{commit}" >/dev/null; then

@@ -16,9 +16,16 @@ mkdir -p "$STATE"
 
 harness_component_name() {
   local name=$1
+  local bare=${name#.}
   case "$name" in
     claude|codex|opencode|grok|pi)
       printf '%s\n' "$name"
+      return 0
+      ;;
+  esac
+  case "$bare" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "$bare"
       return 0
       ;;
   esac
@@ -28,20 +35,26 @@ harness_component_name() {
       return 0
       ;;
   esac
+  case "${bare%.*}" in
+    claude|codex|opencode|grok|pi)
+      printf '%s\n' "${bare%.*}"
+      return 0
+      ;;
+  esac
   case "$name" in
-    claude[-_.]*|*[-_.]claude|*[-_.]claude[-_.]*)
+    claude[-_.]*)
       printf '%s\n' claude
       return 0
       ;;
-    codex[-_.]*|*[-_.]codex|*[-_.]codex[-_.]*)
+    codex[-_.]*)
       printf '%s\n' codex
       return 0
       ;;
-    opencode[-_.]*|*[-_.]opencode|*[-_.]opencode[-_.]*)
+    opencode[-_.]*)
       printf '%s\n' opencode
       return 0
       ;;
-    grok[-_.]*|*[-_.]grok|*[-_.]grok[-_.]*)
+    grok[-_.]*)
       printf '%s\n' grok
       return 0
       ;;

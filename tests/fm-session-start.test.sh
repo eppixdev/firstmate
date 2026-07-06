@@ -359,6 +359,49 @@ SH
   chmod +x "$fakebin/ps"
 }
 
+make_fake_ps_node_codex_substring_path() {
+  local fakebin=$1
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+pid=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-p" ]; then
+    pid=$arg
+  fi
+  prev=$arg
+done
+case "$*" in
+  *"-o comm="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' 'node' ;;
+      *) printf '%s\n' 'zsh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o args="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' 'node /tmp/not-codex-tool/server.js' ;;
+      *) printf '%s\n' '/usr/bin/zsh -c bin/fm-session-start.sh' ;;
+    esac
+    exit 0
+    ;;
+  *"-o ppid="*)
+    case "$pid" in
+      ''|*[!0-9]*) exit 1 ;;
+      1) printf '%s\n' '0' ;;
+      *) printf '%s\n' '1' ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 1
+SH
+  chmod +x "$fakebin/ps"
+}
+
 make_fake_ps_wrapped_python_grok() {
   local fakebin=$1
   cat > "$fakebin/ps" <<'SH'
@@ -591,6 +634,24 @@ EOF
   assert_not_contains "$out" "cannot locate harness process in ancestry" "node-hosted Codex script path was rejected as missing from ancestry"
 
   pass "lock acquisition accepts node-hosted Codex script paths under a verified harness directory"
+}
+
+test_lock_rejects_node_script_under_harness_substring_directory() {
+  local rec root home fakebin out
+  rec=$(new_world node-codex-substring-path-lock)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_node_codex_substring_path "$fakebin"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH" 2>&1)
+
+  assert_contains "$out" "cannot locate harness process in ancestry" "node script under a codex substring directory was not rejected as a missing harness"
+  assert_not_contains "$out" "lock acquired: harness pid" "node script under a codex substring directory still acquired the lock"
+  assert_contains "$out" "READ-ONLY SESSION" "node script under a codex substring directory did not fall back to the read-only session path"
+
+  pass "lock acquisition rejects node script paths that only contain a harness substring"
 }
 
 test_lock_acquires_when_python_runs_verified_harness_script() {
@@ -908,6 +969,7 @@ test_lock_rejects_shell_ancestor_that_only_mentions_harness_in_args
 test_lock_acquires_when_node_runs_the_harness_binary
 test_lock_rejects_node_eval_that_only_mentions_harness_in_source
 test_lock_acquires_when_node_runs_harness_script_inside_verified_dir
+test_lock_rejects_node_script_under_harness_substring_directory
 test_lock_acquires_when_python_runs_verified_harness_script
 test_lock_refusal_read_only_path
 test_output_ordering_diagnostics_lead

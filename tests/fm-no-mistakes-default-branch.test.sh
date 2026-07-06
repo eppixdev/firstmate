@@ -425,6 +425,44 @@ test_refreshes_stale_remote_default_before_repair() {
   pass "fm-no-mistakes-default-branch refreshes origin/main before repair"
 }
 
+test_bounds_remote_default_refresh_fetch() {
+  local repo peer origin gate fakebin log expected
+  repo="$TMP_ROOT/repo-bounded-origin-main"
+  peer="$TMP_ROOT/repo-bounded-origin-main-peer"
+  origin="$TMP_ROOT/origin-bounded-origin-main.git"
+  gate="$TMP_ROOT/gate-bounded-origin-main.git"
+  fakebin="$TMP_ROOT/bounded-fetch-fakebin"
+  log="$TMP_ROOT/bounded-fetch.log"
+  make_repo_with_origin "$repo" "$origin"
+  git clone -q "$origin" "$peer"
+  git -C "$peer" config user.name 'Firstmate Tests'
+  git -C "$peer" config user.email 'tests@example.invalid'
+  printf 'peer\n' >> "$peer/README.md"
+  git -C "$peer" commit -qam peer
+  git -C "$peer" push origin main >/dev/null
+  git -C "$repo" remote set-head origin --delete >/dev/null 2>&1 || true
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/timeout" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+shift
+exec "\$@"
+SH
+  chmod +x "$fakebin/timeout"
+
+  PATH="$fakebin:$PATH" FM_DEFAULT_BRANCH_FETCH_TIMEOUT=7 "$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo" >/dev/null \
+    || fail "default-branch repair failed with bounded fetch wrapper"
+  expected=$(git --git-dir="$origin" rev-parse refs/heads/main)
+  [ "$(git -C "$repo" rev-parse origin/main)" = "$expected" ] \
+    || fail "bounded fetch wrapper did not refresh origin/main"
+  assert_grep "7 git -C $repo fetch --quiet origin +refs/heads/main:refs/remotes/origin/main" "$log" \
+    "origin/main refresh fetch did not run through the configured timeout wrapper"
+
+  pass "fm-no-mistakes-default-branch bounds the origin default-branch refresh fetch"
+}
+
 test_repairs_divergent_gate_refs() {
   local repo origin gate out expected stale
   repo="$TMP_ROOT/repo-divergent-gate"
@@ -491,5 +529,6 @@ test_resolves_relative_gate_paths_from_repo_root
 test_resolves_relative_gate_paths_from_subdirectories
 test_resolves_relative_gate_paths_from_linked_worktrees
 test_refreshes_stale_remote_default_before_repair
+test_bounds_remote_default_refresh_fetch
 test_repairs_divergent_gate_refs
 test_rejects_non_bare_gate_repo
