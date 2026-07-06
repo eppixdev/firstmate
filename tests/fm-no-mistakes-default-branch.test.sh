@@ -143,6 +143,35 @@ test_prefers_single_remote_branch_over_local_main_fallback() {
   pass "fm-no-mistakes-default-branch prefers remote branch evidence over local main"
 }
 
+test_prefers_remote_head_over_stale_local_origin_head() {
+  local repo origin gate out expected
+  repo="$TMP_ROOT/repo-stale-origin-head"
+  origin="$TMP_ROOT/origin-stale-origin-head.git"
+  gate="$TMP_ROOT/gate-stale-origin-head.git"
+  make_repo_with_origin "$repo" "$origin"
+  git -C "$repo" remote set-head origin -a >/dev/null
+  git -C "$repo" checkout -q -b trunk
+  printf 'trunk\n' >> "$repo/README.md"
+  git -C "$repo" commit -qam trunk
+  git -C "$repo" push -u origin trunk >/dev/null
+  git --git-dir="$origin" symbolic-ref HEAD refs/heads/trunk
+  git init --bare -q "$gate"
+  git -C "$repo" remote add no-mistakes "$gate"
+
+  out=$("$ROOT/bin/fm-no-mistakes-default-branch.sh" "$repo") || fail "default-branch repair failed for stale origin/HEAD"
+  expected=$(git -C "$repo" rev-parse origin/trunk)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/trunk)" = "$expected" ] \
+    || fail "repair did not seed refs/heads/trunk from remote HEAD"
+  [ "$(git --git-dir="$gate" symbolic-ref HEAD)" = "refs/heads/trunk" ] \
+    || fail "repair trusted stale local origin/HEAD instead of remote HEAD"
+  if git --git-dir="$gate" show-ref --verify --quiet refs/heads/main; then
+    fail "repair seeded stale refs/heads/main from local origin/HEAD"
+  fi
+  assert_contains "$out" "healed: seeded no-mistakes gate mirror trunk, origin/trunk, and HEAD" \
+    "repair did not report the remote-HEAD trunk self-heal"
+  pass "fm-no-mistakes-default-branch prefers remote HEAD over stale local origin/HEAD"
+}
+
 test_fails_closed_for_lone_local_tracking_branch_when_origin_head_is_missing() {
   local repo origin gate peer err
   repo="$TMP_ROOT/repo-develop-and-remote-topic"
@@ -440,6 +469,7 @@ test_repairs_head_when_refs_are_already_seeded
 test_fails_without_no_mistakes_remote
 test_uses_non_main_default_branch_without_origin_head
 test_prefers_single_remote_branch_over_local_main_fallback
+test_prefers_remote_head_over_stale_local_origin_head
 test_fails_closed_for_lone_local_tracking_branch_when_origin_head_is_missing
 test_fails_closed_for_single_fetched_topic_when_origin_head_is_missing
 test_fails_closed_for_ancestry_only_default_guess

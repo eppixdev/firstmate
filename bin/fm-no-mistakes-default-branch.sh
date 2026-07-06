@@ -58,9 +58,12 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { echo "error: $REPO is not a git work tree" >&2; exit 1; }
 WORKTREE_ROOT=$(git -C "$REPO" rev-parse --show-toplevel)
 
-DEFAULT=$(fm_default_branch "$REPO" 2>/dev/null || true)
-if [ -z "$DEFAULT" ] && git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
+DEFAULT=
+if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
   DEFAULT=$(probe_origin_default_branch "$REPO" || true)
+fi
+if [ -z "$DEFAULT" ]; then
+  DEFAULT=$(fm_default_branch "$REPO" 2>/dev/null || true)
 fi
 [ -n "$DEFAULT" ] \
   || { echo "error: cannot determine default branch for $REPO; expected local origin/HEAD, bounded origin HEAD probe, or local-only unambiguous branch evidence" >&2; exit 1; }
