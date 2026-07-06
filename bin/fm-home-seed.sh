@@ -768,6 +768,10 @@ initialize_no_mistakes_project() {
   [ "$mode" = no-mistakes ] || return 0
   dst=$(validate_project_destination "$home" "$project") || return 1
   if git -C "$dst" remote get-url no-mistakes >/dev/null 2>&1; then
+    "$FM_ROOT/bin/fm-no-mistakes-default-branch.sh" "$dst" >/dev/null || {
+      echo "error: failed to verify no-mistakes default-branch refs for $project at $dst" >&2
+      return 1
+    }
     return 0
   fi
   if [ "$created" != 1 ]; then

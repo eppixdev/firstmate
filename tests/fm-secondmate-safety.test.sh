@@ -673,22 +673,26 @@ test_home_seed_resolves_relative_source_origins() {
   pass "home seeding resolves relative source origins against the source project"
 }
 
-test_home_seed_skips_initialized_existing_no_mistakes_projects() {
-  local home subhome err fakebin log origin
+test_home_seed_repairs_initialized_existing_no_mistakes_projects() {
+  local home subhome err fakebin log origin gate expected
   home="$TMP_ROOT/existing-initialized-home"
   subhome="$TMP_ROOT/existing-initialized-subhome"
   err="$TMP_ROOT/existing-initialized.err"
   log="$TMP_ROOT/existing-initialized-no-mistakes.log"
+  gate="$TMP_ROOT/no-mistakes-alpha.git"
   mkdir -p "$home/projects" "$home/data" "$home/state"
   fm_git_init_commit "$home/projects/alpha"
   fm_git_init_commit "$home/projects/beta"
+  git -C "$home/projects/alpha" branch -M main
+  git -C "$home/projects/beta" branch -M main
   fm_git_add_origin "$home/projects/alpha" "$TMP_ROOT/remotes/existing-alpha.git"
   fm_git_add_origin "$home/projects/beta" "$TMP_ROOT/remotes/existing-beta.git"
   git clone --quiet "$ROOT" "$subhome"
   mkdir -p "$subhome/projects"
   origin=$(git -C "$home/projects/alpha" remote get-url origin)
   git clone --quiet "$origin" "$subhome/projects/alpha"
-  git -C "$subhome/projects/alpha" remote add no-mistakes "$TMP_ROOT/no-mistakes-alpha.git"
+  git init --bare -q "$gate"
+  git -C "$subhome/projects/alpha" remote add no-mistakes "$gate"
   printf '%s\n' '- alpha - alpha project (added 2026-06-22)' '- beta - beta project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_recording_no_mistakes "$TMP_ROOT/existing-initialized-fake")
   : > "$log"
@@ -704,8 +708,13 @@ test_home_seed_skips_initialized_existing_no_mistakes_projects() {
     && fail "seed ran no-mistakes against an initialized existing clone"
   [ ! -f "$subhome/projects/alpha/.no-mistakes-init" ] || fail "seed mutated initialized existing clone with no-mistakes init"
   [ ! -f "$subhome/projects/alpha/.no-mistakes-doctor" ] || fail "seed mutated initialized existing clone with no-mistakes doctor"
+  expected=$(git -C "$subhome/projects/alpha" rev-parse origin/main)
+  [ "$(git --git-dir="$gate" rev-parse refs/heads/main)" = "$expected" ] \
+    || fail "seed did not repair initialized existing no-mistakes clone main ref"
+  [ "$(git --git-dir="$gate" rev-parse refs/remotes/origin/main)" = "$expected" ] \
+    || fail "seed did not repair initialized existing no-mistakes clone origin/main ref"
   [ ! -e "$subhome/projects/beta" ] || fail "failed seed left a newly cloned project after no-mistakes failure"
-  pass "home seeding skips initialized existing no-mistakes clones"
+  pass "home seeding repairs initialized existing no-mistakes clones"
 }
 
 test_home_seed_refuses_uninitialized_existing_no_mistakes_project() {
@@ -1751,7 +1760,7 @@ test_home_seed_refuses_home_overlapping_registered_home
 test_home_seed_refuses_remote_backed_project_without_origin
 test_home_seed_refuses_existing_remote_backed_project_with_wrong_origin
 test_home_seed_resolves_relative_source_origins
-test_home_seed_skips_initialized_existing_no_mistakes_projects
+test_home_seed_repairs_initialized_existing_no_mistakes_projects
 test_home_seed_refuses_uninitialized_existing_no_mistakes_project
 test_home_seed_refuses_project_destinations_outside_subhome
 test_home_seed_refuses_operational_dirs_outside_subhome
