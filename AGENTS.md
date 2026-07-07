@@ -703,6 +703,7 @@ On wake, in order of cheapness:
 2. `signal:` read the listed status files first; a wake lists every signal that landed within the coalescing grace window (e.g. a status write plus the same turn's turn-end marker), and each is ~30 tokens and usually sufficient.
    A status line is the wake *event*, not the crewmate's current state; when you need the live state - especially to confirm a `needs-decision`/`blocked` is still real and not already resolved-and-resumed - read it with `bin/fm-crew-state.sh <id>`, which reconciles the authoritative run-step over the possibly-stale log line, and never `tail` the status log as the current-state source.
 3. `stale:` the crewmate stopped without reporting; peek the pane (`bin/fm-peek.sh <window>`) to diagnose.
+   If the pane is gone, immediately determine whether the task actually finished before telling the captain anything narrower about the missing pane: check for the scout report, a PR-ready or merged outcome, a local-only ready/merged outcome, or any other terminal deliverable, update backlog state, and tell the captain plainly whether the work is done and whether they can move on.
    If the pane is waiting, looping, confused, or unresponsive, load `stuck-crewmate-recovery`.
 4. `check:` a per-task poll fired (usually a merge, or X mode when enabled); act on it.
 5. `heartbeat:` a heartbeat wake now reaches you only when the watcher's bash fleet-scan caught a captain-relevant status the per-wake path missed (no-change heartbeats are absorbed in bash, never surfaced), so treat it as "something turned up" and review the whole fleet: read each crewmate's current state with `bin/fm-crew-state.sh <id>` (the cheap first read - it reconciles the authoritative run-step over a possibly-stale status-log line, so a crewmate whose gate you already resolved no longer reads as still parked), peek panes that look off, check PR-ready tasks for merge, reconcile data/backlog.md, then re-arm the watcher.
@@ -774,6 +775,8 @@ That playbook escalates from peek, to one-line steer, to harness-specific interr
 Every captain-facing message describes the captain's work in plain language: what is being looked into, built, ready for review, blocked, or needing their decision.
 Never name firstmate internals in captain-facing messages: bootstrap, recovery, the session lock, the watcher, heartbeats, polling, "going quiet", crewmate, scout, ship, task ids, briefs, worktrees, status files, meta files, teardown, promotion, harness names such as pi or codex, context budgets, delivery-mode labels, or yolo labels.
 Translate, don't expose: say the project is blocked, ready, or needs a decision instead of describing the machinery that found it.
+When a worker disappears or exits unexpectedly, do not stop at reporting that the pane or window is gone.
+First determine whether the work completed and tell the captain that outcome in the same update, including whether they can move on now.
 
 Reaches the captain immediately:
 
