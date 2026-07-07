@@ -748,6 +748,62 @@ test_keepalive_rearms_after_actionable_wake() {
   pass "keepalive arm starts a fresh watcher cycle after an actionable wake"
 }
 
+test_keepalive_dedupes_concurrent_wrappers() {
+  local dir state fakebin armout1 armout2 status_file armpid1 armpid2 i total_started after
+  dir=$(make_case arm-keepalive-dedupe)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout1="$dir/arm-1.out"
+  armout2="$dir/arm-2.out"
+  status_file="$state/task.status"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_WATCH_ARM_KEEPALIVE_IDLE_SLEEP=1 \
+    "$WATCH_ARM" --keepalive > "$armout1" &
+  armpid1=$!
+
+  i=0
+  while [ "$i" -lt 80 ]; do
+    grep -qF 'watcher: started pid=' "$armout1" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout1" || fail "first keepalive wrapper did not start the watcher"
+  [ "$(cat "$state/.watch.keepalive.lock/pid" 2>/dev/null || true)" = "$armpid1" ] \
+    || fail "first keepalive wrapper did not claim the keepalive singleton lock"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_WATCH_ARM_KEEPALIVE_IDLE_SLEEP=1 \
+    "$WATCH_ARM" --keepalive > "$armout2" &
+  armpid2=$!
+
+  wait_for_exit "$armpid2" 40
+  rc=$?
+  [ "$rc" -eq 0 ] || fail "duplicate keepalive wrapper did not exit cleanly (got $rc): $(cat "$armout2")"
+  [ "$(cat "$state/.watch.keepalive.lock/pid" 2>/dev/null || true)" = "$armpid1" ] \
+    || fail "duplicate keepalive wrapper disturbed the keepalive singleton lock"
+  kill -0 "$armpid1" 2>/dev/null || fail "first keepalive wrapper is not alive after duplicate launch"
+
+  total_started=$( (cat "$armout1" "$armout2" 2>/dev/null || true) | grep -cF 'watcher: started pid=' || true )
+  [ "$total_started" -eq 1 ] || fail "duplicate keepalive wrapper triggered extra watcher starts: $(cat "$armout1")$(cat "$armout2")"
+
+  printf 'done: PR https://example.test/pr/12\n' > "$status_file"
+  i=0
+  while [ "$i" -lt 100 ]; do
+    total_started=$( (cat "$armout1" "$armout2" 2>/dev/null || true) | grep -cF 'watcher: started pid=' || true )
+    [ "$total_started" -ge 2 ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ "$total_started" -eq 2 ] || fail "singleton keepalive wrapper did not rearm exactly once after wake: $(cat "$armout1")$(cat "$armout2")"
+  after=$(cat "$state/.watch.keepalive.lock/pid" 2>/dev/null || true)
+  [ "$after" = "$armpid1" ] || fail "keepalive singleton lock changed owners after the wake rearm"
+
+  kill "$armpid1" "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" 2>/dev/null || true
+  wait "$armpid1" 2>/dev/null || true
+  pass "keepalive mode dedupes concurrent wrappers per home"
+}
+
 test_arm_waits_for_peer_beacon_after_child_stands_down() {
   local dir state fakebin armout peer beater identity status
   dir=$(make_case arm-peer-startup-race)
@@ -911,6 +967,7 @@ test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_keepalive_rearms_after_actionable_wake
+test_keepalive_dedupes_concurrent_wrappers
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_accepts_equivalent_home_aliases
 test_arm_rejects_leftover_fresh_beacon_until_child_owns_it

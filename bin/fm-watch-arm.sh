@@ -53,6 +53,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 WATCH="$SCRIPT_DIR/fm-watch.sh"
 WATCH_LOCK="$STATE/.watch.lock"
+KEEPALIVE_LOCK="$STATE/.watch.keepalive.lock"
 BEAT="$STATE/.last-watcher-beat"
 # "Fresh" reuses the guard's threshold so there is one definition of liveness.
 GRACE=${FM_GUARD_GRACE:-300}
@@ -65,6 +66,11 @@ watch_lock_matches_pid() {
   fm_watcher_lock_matches_pid "$WATCH_LOCK" "$pid" "$WATCH" "$FM_HOME"
 }
 
+keepalive_lock_matches_pid() {
+  local pid=$1
+  fm_watcher_lock_matches_pid "$KEEPALIVE_LOCK" "$pid" "$0" "$FM_HOME"
+}
+
 clear_stale_recorded_watcher_lock() {
   local lock_home lock_path lock_identity
   lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
@@ -74,6 +80,17 @@ clear_stale_recorded_watcher_lock() {
   fm_paths_equivalent "$lock_path" "$WATCH" || return 0
   [ -n "$lock_identity" ] || return 0
   fm_lock_remove_path "$WATCH_LOCK" || true
+}
+
+clear_stale_recorded_keepalive_lock() {
+  local lock_home lock_path lock_identity
+  lock_home=$(cat "$KEEPALIVE_LOCK/fm-home" 2>/dev/null || true)
+  lock_path=$(cat "$KEEPALIVE_LOCK/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$KEEPALIVE_LOCK/pid-identity" 2>/dev/null || true)
+  fm_paths_equivalent "$lock_home" "$FM_HOME" || return 0
+  fm_paths_equivalent "$lock_path" "$0" || return 0
+  [ -n "$lock_identity" ] || return 0
+  fm_lock_remove_path "$KEEPALIVE_LOCK" || true
 }
 
 # A watcher is "healthy" iff the lock names a live process that is genuinely THIS
@@ -152,11 +169,30 @@ done
 
 if [ "$keepalive" -eq 1 ] && [ -z "${FM_WATCH_ARM_KEEPALIVE_CHILD:-}" ]; then
   keepalive_child=
+  if ! fm_lock_try_acquire "$KEEPALIVE_LOCK"; then
+    keepalive_pid=$(cat "$KEEPALIVE_LOCK/pid" 2>/dev/null || true)
+    if ! keepalive_lock_matches_pid "$keepalive_pid"; then
+      clear_stale_recorded_keepalive_lock
+      if ! fm_lock_try_acquire "$KEEPALIVE_LOCK"; then
+        keepalive_pid=$(cat "$KEEPALIVE_LOCK/pid" 2>/dev/null || true)
+        if keepalive_lock_matches_pid "$keepalive_pid"; then
+          exit 0
+        fi
+        exit 1
+      fi
+    else
+      exit 0
+    fi
+  fi
+  printf '%s\n' "$FM_HOME" > "$KEEPALIVE_LOCK/fm-home" || true
+  printf '%s\n' "$0" > "$KEEPALIVE_LOCK/watcher-path" || true
+  fm_pid_identity "${BASHPID:-$$}" > "$KEEPALIVE_LOCK/pid-identity" 2>/dev/null || true
   # shellcheck disable=SC2329
   cleanup_keepalive_child() {
     if [ -n "$keepalive_child" ] && fm_pid_alive "$keepalive_child"; then
       kill -TERM "$keepalive_child" 2>/dev/null || true
     fi
+    fm_lock_release "$KEEPALIVE_LOCK" 2>/dev/null || true
   }
   trap 'cleanup_keepalive_child; exit 129' HUP
   trap 'cleanup_keepalive_child; exit 143' TERM INT
