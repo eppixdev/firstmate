@@ -320,7 +320,7 @@ Reconcile reality with your records before doing anything else, working from the
    The main firstmate reconciles only direct reports.
    Each secondmate is a firstmate in its own home, so it reconciles only work that is already its own and then idles; it never creates new work during recovery.
 8. The digest already reports whether `state/.afk` is present.
-   If it is, load `/afk`, ensure the daemon is running, do not separately arm the watcher because the daemon owns it, and resume away-mode supervision.
+   If it is, load `/afk`, ensure the daemon is running through `bin/fm-afk-start.sh`, do not separately arm the watcher because the daemon owns it, and resume away-mode supervision.
 9. Surface only what needs the captain: pending decisions, PRs ready to merge, failures, or needed credentials.
    If there is nothing that needs them, say nothing and resume.
 10. Having already handled the drained wakes from the digest, follow the section 8 watcher checklist through the digest's own closing reminder; if the lock was refused or `state/.afk` exists, follow the digest's no-direct-arm guidance.
@@ -754,6 +754,7 @@ The skill owns the full daemon procedure: classification policy, batching, injec
 Inline facts that must survive without a loaded skill:
 
 - Every daemon injection is prefixed with `FM_INJECT_MARK`, ASCII unit separator `0x1f`, so internal escalations are distinguishable from a captain message.
+- Enter or refresh away mode only through `bin/fm-afk-start.sh`; do not precreate `state/.afk` or background `fm-supervise-daemon.sh` with manual `nohup ... &`.
 - While `state/.afk` exists, the daemon owns the watcher; do not separately arm `fm-watch-arm.sh` or `fm-watch.sh`.
 - If firstmate receives a marked message while afk is active, it is an internal escalation: stay afk and process it.
 - If the message starts with `/afk`, stay afk and refresh the flag.
