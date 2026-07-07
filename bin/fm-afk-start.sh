@@ -27,11 +27,21 @@ shell_quote() {
 }
 
 pidfile_alive() {
-  local pid
+  local pid lock_pid identity
   pid=$(cat "$PIDFILE" 2>/dev/null || true)
   [ -n "$pid" ] \
     && fm_pid_alive "$pid" \
-    && fm_watcher_lock_matches_pid "$LOCK" "$pid" "$DAEMON" "$FM_HOME"
+    || return 1
+  if fm_watcher_lock_matches_pid "$LOCK" "$pid" "$DAEMON" "$FM_HOME"; then
+    return 0
+  fi
+  lock_pid=$(cat "$LOCK/pid" 2>/dev/null || true)
+  [ "$lock_pid" = "$pid" ] || return 1
+  identity=$(fm_pid_identity "$pid") || return 1
+  case "$identity" in
+    *fm-supervise-daemon.sh*) return 0 ;;
+  esac
+  return 1
 }
 
 afk_created=0
@@ -103,7 +113,9 @@ done
 cmd="$cmd $(shell_quote "$DAEMON") >>$(shell_quote "$LAUNCH_LOG") 2>&1"
 
 enable_afk
-tmux run-shell -b "$cmd"
+tmux run-shell -b "$cmd" || {
+  fail_startup "error: tmux failed to launch the afk supervise daemon"
+}
 
 start=$(date +%s)
 while [ $(( $(date +%s) - start )) -lt "$CONFIRM_TIMEOUT" ]; do

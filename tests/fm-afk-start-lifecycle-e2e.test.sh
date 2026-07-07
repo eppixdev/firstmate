@@ -148,7 +148,6 @@ reset_runtime_state() {
         "$STATE_DIR"/.supervise-daemon.pid \
         "$STATE_DIR"/.supervise-daemon.log \
         "$STATE_DIR"/.supervise-daemon.watcher.err \
-        "$STATE_DIR"/.supervise-daemon.lock \
         "$STATE_DIR"/.supervise-daemon.lock.* \
         "$STATE_DIR"/.afk \
         "$STATE_DIR"/.wake-queue* \
@@ -160,6 +159,7 @@ reset_runtime_state() {
         "$STATE_DIR"/.seen-* \
         "$STATE_DIR"/.heartbeat-streak \
         2>/dev/null || true
+  rm -rf "$STATE_DIR"/.supervise-daemon.lock 2>/dev/null || true
   : > "$LOG_FILE"
 }
 
@@ -176,6 +176,64 @@ test_afk_start_failure_does_not_leave_afk_active() {
   [ ! -s "$STATE_DIR/.supervise-daemon.pid" ] \
     || fail "fm-afk-start left a daemon pid after startup target failure"
   pass "fm-afk-start does not leave afk active on startup failure"
+}
+
+test_afk_start_run_shell_failure_rolls_back_afk() {
+  reset_runtime_state
+  local failing_tmux_dir
+  failing_tmux_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-tmux-fail.XXXXXX")
+  cat > "$failing_tmux_dir/tmux" <<SHIM
+#!/usr/bin/env bash
+case "\$1" in
+  display-message) printf '%%1\\n'; exit 0 ;;
+  run-shell) exit 42 ;;
+esac
+exec "$REAL_TMUX" -L "$SOCKET" "\$@"
+SHIM
+  chmod +x "$failing_tmux_dir/tmux"
+
+  PATH="$failing_tmux_dir:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="$SUPERVISOR_PANE" \
+    "$START" >"$STATE_DIR/run-shell-fail.out" 2>"$STATE_DIR/run-shell-fail.err" \
+    && { rm -rf "$failing_tmux_dir" 2>/dev/null || true; fail "fm-afk-start succeeded after tmux run-shell failed"; }
+
+  rm -rf "$failing_tmux_dir" 2>/dev/null || true
+  [ ! -e "$STATE_DIR/.afk" ] \
+    || fail "fm-afk-start left .afk active after tmux run-shell failure"
+  pass "fm-afk-start rolls back afk when tmux launch fails"
+}
+
+test_afk_skill_uses_start_helper_as_afk_entry() {
+  grep -F "date '+%s' > state/.afk" "$ROOT/.agents/skills/afk/SKILL.md" >/dev/null 2>&1 \
+    && fail "afk skill still instructs precreating .afk before fm-afk-start"
+  grep -F "bin/fm-afk-start.sh" "$ROOT/.agents/skills/afk/SKILL.md" >/dev/null 2>&1 \
+    || fail "afk skill does not instruct using fm-afk-start"
+  pass "afk skill makes fm-afk-start the entry path"
+}
+
+test_afk_start_accepts_live_legacy_daemon_lock() {
+  reset_runtime_state
+  bash -c 'while :; do sleep 60; done' fm-supervise-daemon.sh &
+  local legacy_pid=$!
+  mkdir "$STATE_DIR/.supervise-daemon.lock"
+  printf '%s\n' "$legacy_pid" > "$STATE_DIR/.supervise-daemon.lock/pid"
+  printf '%s\n' "$legacy_pid" > "$STATE_DIR/.supervise-daemon.pid"
+
+  PATH="$TMUX_SHIM_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="%999999" \
+    "$START" >"$STATE_DIR/legacy-lock.out" 2>"$STATE_DIR/legacy-lock.err" \
+    || { kill "$legacy_pid" 2>/dev/null || true; cat "$STATE_DIR/legacy-lock.err" >&2 2>/dev/null || true; fail "fm-afk-start rejected a live legacy daemon lock"; }
+
+  local daemon_pid
+  daemon_pid=$(cat "$STATE_DIR/.supervise-daemon.pid" 2>/dev/null || true)
+  [ "$daemon_pid" = "$legacy_pid" ] \
+    || { kill "$legacy_pid" 2>/dev/null || true; fail "fm-afk-start replaced a live legacy daemon"; }
+  [ -e "$STATE_DIR/.afk" ] \
+    || { kill "$legacy_pid" 2>/dev/null || true; fail "fm-afk-start did not activate afk for live legacy daemon"; }
+  kill "$legacy_pid" 2>/dev/null || true
+  pass "fm-afk-start accepts live legacy daemon locks"
 }
 
 test_afk_start_rejects_stale_live_pidfile() {
@@ -202,8 +260,9 @@ test_afk_start_rejects_stale_live_pidfile() {
   [ "$daemon_pid" != "$stale_pid" ] \
     || { kill "$stale_pid" 2>/dev/null || true; fail "fm-afk-start trusted stale live pidfile"; }
   kill "$stale_pid" 2>/dev/null || true
-  [ -n "$daemon_pid" ] && kill -0 "$daemon_pid" 2>/dev/null \
-    || fail "fm-afk-start did not replace stale pidfile with a live daemon"
+  if [ -z "$daemon_pid" ] || ! kill -0 "$daemon_pid" 2>/dev/null; then
+    fail "fm-afk-start did not replace stale pidfile with a live daemon"
+  fi
   pass "fm-afk-start rejects stale live pidfiles"
 }
 
@@ -286,6 +345,9 @@ test_afk_start_survives_launcher_teardown_and_escalates_done() {
 }
 
 test_afk_start_failure_does_not_leave_afk_active
+test_afk_start_run_shell_failure_rolls_back_afk
+test_afk_skill_uses_start_helper_as_afk_entry
+test_afk_start_accepts_live_legacy_daemon_lock
 test_afk_start_rejects_stale_live_pidfile
 test_direct_nohup_can_leave_afk_without_daemon
 test_afk_start_survives_launcher_teardown_and_escalates_done

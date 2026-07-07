@@ -16,18 +16,12 @@ batched digest rather than per-wake injections.
 
 ## What it does
 
-1. **Set the durable away-mode flag:**
-   ```sh
-   date '+%s' > state/.afk
-   ```
-   This file survives a firstmate restart: recovery re-enters afk if the
-   flag is present.
-
-2. **Ensure the sub-supervisor daemon is running.** Check the pid file; start
-   the daemon only if it is dead or absent by using the durable start helper:
+1. **Enter away mode through the durable start helper:**
    ```sh
    bin/fm-afk-start.sh
    ```
+   The helper is the only writer for entering away mode: it sets `state/.afk` only when an existing daemon is confirmed healthy or a new daemon has reached the launch path, and removes a newly created flag if startup cannot be confirmed.
+   This file survives a firstmate restart: recovery re-enters afk if the flag is present.
    Do not replace this with a manual `nohup ... &`.
    Some harnesses clean up descendants of a completed tool command, which can
    kill a manually backgrounded daemon and leave `state/.afk` active with no
@@ -37,10 +31,10 @@ batched digest rather than per-wake injections.
    The daemon is **presence-gated**: it injects escalations only while
    `state/.afk` exists, and stays quiet otherwise.
 
-3. **Do not separately arm `fm-watch.sh`.** The daemon manages the watcher as
+2. **Do not separately arm `fm-watch.sh`.** The daemon manages the watcher as
    its child; the singleton lock no-ops a stray arm harmlessly.
 
-4. **Acknowledge** to the captain that away-mode is active: the daemon will
+3. **Acknowledge** to the captain that away-mode is active: the daemon will
    self-handle routine wakes, escalate only captain-relevant events, and the
    captain can exit by sending any real message.
 
