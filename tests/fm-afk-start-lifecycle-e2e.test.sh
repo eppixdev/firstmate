@@ -139,11 +139,18 @@ run_watcher_once() {
 }
 
 reset_runtime_state() {
+  if [ -s "$STATE_DIR/.supervise-daemon.pid" ]; then
+    kill "$(cat "$STATE_DIR/.supervise-daemon.pid")" 2>/dev/null || true
+    sleep 0.2
+  fi
   rm -f "$STATE_DIR"/*.status \
         "$STATE_DIR"/.subsuper-* \
         "$STATE_DIR"/.supervise-daemon.pid \
         "$STATE_DIR"/.supervise-daemon.log \
         "$STATE_DIR"/.supervise-daemon.watcher.err \
+        "$STATE_DIR"/.supervise-daemon.lock \
+        "$STATE_DIR"/.supervise-daemon.lock.* \
+        "$STATE_DIR"/.afk \
         "$STATE_DIR"/.wake-queue* \
         "$STATE_DIR"/.watch.lock* \
         "$STATE_DIR"/.last-* \
@@ -154,6 +161,50 @@ reset_runtime_state() {
         "$STATE_DIR"/.heartbeat-streak \
         2>/dev/null || true
   : > "$LOG_FILE"
+}
+
+test_afk_start_failure_does_not_leave_afk_active() {
+  reset_runtime_state
+  PATH="$TMUX_SHIM_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="%999999" \
+    "$START" >"$STATE_DIR/start-fail.out" 2>"$STATE_DIR/start-fail.err" \
+    && fail "fm-afk-start succeeded with missing supervisor target"
+
+  [ ! -e "$STATE_DIR/.afk" ] \
+    || fail "fm-afk-start left .afk active after startup target failure"
+  [ ! -s "$STATE_DIR/.supervise-daemon.pid" ] \
+    || fail "fm-afk-start left a daemon pid after startup target failure"
+  pass "fm-afk-start does not leave afk active on startup failure"
+}
+
+test_afk_start_rejects_stale_live_pidfile() {
+  reset_runtime_state
+  sleep 60 &
+  local stale_pid=$!
+  printf '%s\n' "$stale_pid" > "$STATE_DIR/.supervise-daemon.pid"
+
+  PATH="$TMUX_SHIM_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="$SUPERVISOR_PANE" \
+  FM_ESCALATE_BATCH_SECS=0 \
+  FM_HOUSEKEEPING_TICK=1 \
+  FM_POLL=1 \
+  FM_SIGNAL_GRACE=1 \
+  FM_HEARTBEAT=999999 \
+  FM_CHECK_INTERVAL=999999 \
+  FM_STALE_ESCALATE_SECS=999999 \
+    "$START" >"$STATE_DIR/stale-pid.out" 2>"$STATE_DIR/stale-pid.err" \
+    || { kill "$stale_pid" 2>/dev/null || true; cat "$STATE_DIR/stale-pid.err" >&2 2>/dev/null || true; fail "fm-afk-start did not recover from stale live pidfile"; }
+
+  local daemon_pid
+  daemon_pid=$(cat "$STATE_DIR/.supervise-daemon.pid" 2>/dev/null || true)
+  [ "$daemon_pid" != "$stale_pid" ] \
+    || { kill "$stale_pid" 2>/dev/null || true; fail "fm-afk-start trusted stale live pidfile"; }
+  kill "$stale_pid" 2>/dev/null || true
+  [ -n "$daemon_pid" ] && kill -0 "$daemon_pid" 2>/dev/null \
+    || fail "fm-afk-start did not replace stale pidfile with a live daemon"
+  pass "fm-afk-start rejects stale live pidfiles"
 }
 
 test_direct_nohup_can_leave_afk_without_daemon() {
@@ -234,6 +285,8 @@ test_afk_start_survives_launcher_teardown_and_escalates_done() {
   pass "fm-afk-start survives launcher teardown and escalates a done status"
 }
 
+test_afk_start_failure_does_not_leave_afk_active
+test_afk_start_rejects_stale_live_pidfile
 test_direct_nohup_can_leave_afk_without_daemon
 test_afk_start_survives_launcher_teardown_and_escalates_done
 

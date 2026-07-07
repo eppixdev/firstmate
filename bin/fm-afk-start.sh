@@ -15,6 +15,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DAEMON="$SCRIPT_DIR/fm-supervise-daemon.sh"
 PIDFILE="$STATE/.supervise-daemon.pid"
+LOCK="$STATE/.supervise-daemon.lock"
 LAUNCH_LOG="$STATE/.supervise-daemon.launch.log"
 CONFIRM_TIMEOUT=${FM_AFK_START_CONFIRM_TIMEOUT:-10}
 
@@ -28,7 +29,26 @@ shell_quote() {
 pidfile_alive() {
   local pid
   pid=$(cat "$PIDFILE" 2>/dev/null || true)
-  [ -n "$pid" ] && fm_pid_alive "$pid"
+  [ -n "$pid" ] \
+    && fm_pid_alive "$pid" \
+    && fm_watcher_lock_matches_pid "$LOCK" "$pid" "$DAEMON" "$FM_HOME"
+}
+
+afk_created=0
+enable_afk() {
+  if [ ! -e "$STATE/.afk" ]; then
+    afk_created=1
+  fi
+  date '+%s' > "$STATE/.afk"
+}
+
+fail_startup() {
+  local msg=$1
+  if [ "$afk_created" -eq 1 ]; then
+    rm -f "$STATE/.afk" 2>/dev/null || true
+  fi
+  echo "$msg" >&2
+  exit 1
 }
 
 append_env_assignment() {
@@ -40,24 +60,28 @@ append_env_assignment() {
   printf ' %s=%s' "$name" "$(shell_quote "$val")"
 }
 
+tmux_target_resolves() {
+  local pane
+  pane=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || return 1
+  [ -n "$pane" ]
+}
+
 mkdir -p "$STATE"
-date '+%s' > "$STATE/.afk"
 
 if [ -s "$PIDFILE" ] && pidfile_alive; then
+  enable_afk
   printf 'afk: daemon healthy pid=%s\n' "$(cat "$PIDFILE")"
   exit 0
 fi
 rm -f "$PIDFILE" 2>/dev/null || true
 
 command -v tmux >/dev/null 2>&1 || {
-  echo "error: tmux is required to start the afk supervise daemon" >&2
-  exit 1
+  fail_startup "error: tmux is required to start the afk supervise daemon"
 }
 
 target="${FM_SUPERVISOR_TARGET:-${TMUX_PANE:-firstmate:0}}"
-if ! tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1; then
-  echo "error: supervisor target '$target' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET" >&2
-  exit 1
+if ! tmux_target_resolves "$target"; then
+  fail_startup "error: supervisor target '$target' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET"
 fi
 
 cmd="cd $(shell_quote "$FM_ROOT") && exec env"
@@ -78,6 +102,7 @@ done
 
 cmd="$cmd $(shell_quote "$DAEMON") >>$(shell_quote "$LAUNCH_LOG") 2>&1"
 
+enable_afk
 tmux run-shell -b "$cmd"
 
 start=$(date +%s)
@@ -93,5 +118,8 @@ echo "error: afk supervise daemon did not confirm startup within ${CONFIRM_TIMEO
 if [ -s "$LAUNCH_LOG" ]; then
   echo "launch log:" >&2
   tail -40 "$LAUNCH_LOG" >&2
+fi
+if [ "$afk_created" -eq 1 ]; then
+  rm -f "$STATE/.afk" 2>/dev/null || true
 fi
 exit 1

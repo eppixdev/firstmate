@@ -246,6 +246,12 @@ _collapse_newlines() {  # <text>
   printf '%s' "$s"
 }
 
+tmux_target_resolves() {
+  local pane
+  pane=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || return 1
+  [ -n "$pane" ]
+}
+
 # Auto-discover the supervisor pane at startup. Priority:
 #   1. FM_SUPERVISOR_TARGET env (explicit override) — caller passes it in.
 #   2. $TMUX_PANE — tmux sets this in every pane's environment; inherited by
@@ -627,7 +633,7 @@ inject_msg() {  # <message> [state]
   msg=$(_collapse_newlines "$msg")
   msg="${FM_INJECT_MARK}${msg}"
   target="${FM_SUPERVISOR_TARGET:-$FM_SUPERVISOR_TARGET_DEFAULT}"
-  tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1 || return 1
+  tmux_target_resolves "$target" || return 1
   # (3) Busy-guard: never inject into an in-use pane. Two checks:
   #   a) pane_is_busy: the harness shows a busy footer (agent mid-turn).
   #   b) pane_input_pending: the cursor line has real unsubmitted text after
@@ -771,6 +777,9 @@ fm_super_main() {
     exit 1
   fi
   echo "$$" > "$PIDFILE"
+  printf '%s\n' "$FM_HOME" > "$LOCK/fm-home" || true
+  printf '%s\n' "$FM_DAEMON_DIR/fm-supervise-daemon.sh" > "$LOCK/watcher-path" || true
+  fm_pid_identity "${BASHPID:-$$}" > "$LOCK/pid-identity" 2>/dev/null || true
 
   # --- auto-discover the supervisor target (the pane running firstmate) -----
   # Priority: FM_SUPERVISOR_TARGET override > $TMUX_PANE (inherited from the
@@ -795,7 +804,7 @@ fm_super_main() {
   local TARGET="$FM_SUPERVISOR_TARGET"
 
   # --- validate supervisor target at startup (a missing target is a typo) ---
-  if ! tmux display-message -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1; then
+  if ! tmux_target_resolves "$TARGET"; then
     echo "error: supervisor target '$TARGET' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET" >&2
     log "startup failed: target '$TARGET' not found"
     fm_lock_release "$LOCK" 2>/dev/null || true
@@ -861,7 +870,7 @@ fm_super_main() {
     # has nowhere to go, and firstmate itself is the consumer of escalations.
     # Catch-up signals persist in state/*.status and flow on the next run, so
     # this delays rather than loses work.
-    if ! tmux display-message -p -t "$TARGET" '#{pane_id}' >/dev/null 2>&1; then
+    if ! tmux_target_resolves "$TARGET"; then
       log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
       # Flush is pointless with no pane; preserve any buffered escalations.
       sleep "$INJECT_FAIL_SLEEP"
