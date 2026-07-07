@@ -186,6 +186,35 @@ test_guard_warnings() {
   pass "guard banner leads when down with pending wakes, stays silent only for an owned fresh watcher, and alarms on an anonymous fresh beat"
 }
 
+test_guard_and_arm_trust_fresh_matching_records_when_pid_is_uninspectable() {
+  local dir state err out
+  dir=$(make_case guard-uninspectable)
+  state="$dir/state"
+  err="$dir/guard.err"
+  out="$dir/arm.out"
+
+  printf 'project=x\n' > "$state/task.meta"
+  mkdir "$state/.watch.lock"
+  printf '424242\n' > "$state/.watch.lock/pid"
+  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  printf 'fake-start fake-watch\n' > "$state/.watch.lock/pid-identity"
+  {
+    printf 'pid=424242\n'
+    printf 'pid-identity=fake-start fake-watch\n'
+    printf 'watcher-path=%s\n' "$WATCH"
+    printf 'fm-home=%s\n' "$dir"
+    printf 'beat-epoch=%s\n' "$(date +%s)"
+  } > "$state/.last-watcher-beat"
+
+  FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed on uninspectable fresh records"
+  [ ! -s "$err" ] || fail "guard rejected fresh matching watcher records: $(cat "$err")"
+
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$WATCH_ARM" > "$out" 2>&1 || fail "watch-arm rejected fresh matching watcher records: $(cat "$out")"
+  grep -F 'watcher: healthy pid=424242' "$out" >/dev/null || fail "watch-arm did not report healthy watcher for fresh matching records"
+  pass "guard and watch-arm accept fresh matching watcher records when pid inspection is unavailable"
+}
+
 test_lock_single_winner_under_concurrency() {
   local dir state lockdir marker i pids pid wins
   dir=$(make_case lock-concurrency)
@@ -949,6 +978,7 @@ test_stale_watch_lock_reclaimed
 test_live_stale_watch_lock_is_actionable
 test_session_lock_detects_node_hosted_claude_code_wrapper
 test_guard_warnings
+test_guard_and_arm_trust_fresh_matching_records_when_pid_is_uninspectable
 test_lock_single_winner_under_concurrency
 test_lock_steals_dead_pid_lock
 test_lock_stale_steal_single_winner_under_concurrency

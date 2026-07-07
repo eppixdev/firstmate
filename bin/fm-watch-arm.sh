@@ -103,11 +103,15 @@ healthy_watcher() {
   local pid age
   HEALTHY_PID=
   pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-  fm_pid_alive "$pid" || return 1
-  watch_lock_matches_pid "$pid" || return 1
-  fm_watcher_beat_matches_pid "$BEAT" "$pid" "$WATCH" "$FM_HOME" || return 1
   age=$(fm_path_age "$BEAT")
   [ "$age" -lt "$GRACE" ] || return 1
+  if fm_pid_alive "$pid" \
+    && watch_lock_matches_pid "$pid" \
+    && fm_watcher_beat_matches_pid "$BEAT" "$pid" "$WATCH" "$FM_HOME"; then
+    HEALTHY_PID=$pid
+    return 0
+  fi
+  fm_watcher_records_match "$WATCH_LOCK" "$BEAT" "$WATCH" "$FM_HOME" || return 1
   HEALTHY_PID=$pid
   return 0
 }

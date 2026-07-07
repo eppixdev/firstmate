@@ -88,10 +88,12 @@ if [ -e "$BEAT" ]; then
     age=$(( $(date +%s) - m ))
     beacon_desc="${age}s ago"
     lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-    if fm_pid_alive "$lock_pid" \
-      && fm_watcher_lock_matches_pid "$WATCH_LOCK" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
-      && fm_watcher_beat_matches_pid "$BEAT" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
-      && [ "$age" -lt "$GRACE" ]; then
+    if [ "$age" -lt "$GRACE" ] && {
+      fm_pid_alive "$lock_pid" \
+        && fm_watcher_lock_matches_pid "$WATCH_LOCK" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+        && fm_watcher_beat_matches_pid "$BEAT" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
+      || fm_watcher_records_match "$WATCH_LOCK" "$BEAT" "$WATCH_PATH" "$FM_HOME"
+    }; then
       watcher_fresh=true
     fi
   else

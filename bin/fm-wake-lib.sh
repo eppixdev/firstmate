@@ -111,6 +111,31 @@ fm_watcher_beat_matches_pid() {  # <beat-path> <pid> <watcher-path> <fm-home>
   [ "$beat_ident" = "$current_ident" ]
 }
 
+fm_watcher_records_match() {  # <lockdir> <beat-path> <watcher-path> <fm-home>
+  local lockdir=$1 beat=$2 watcher_path=$3 fm_home=$4
+  local lock_pid lock_home lock_path lock_identity
+  local beat_pid beat_ident beat_path beat_home
+  [ -s "$beat" ] || return 1
+  lock_pid=$(cat "$lockdir/pid" 2>/dev/null || true)
+  lock_home=$(cat "$lockdir/fm-home" 2>/dev/null || true)
+  lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$lockdir/pid-identity" 2>/dev/null || true)
+  beat_pid=$(fm_watcher_beat_value "$beat" pid)
+  beat_ident=$(fm_watcher_beat_value "$beat" 'pid-identity')
+  beat_path=$(fm_watcher_beat_value "$beat" 'watcher-path')
+  beat_home=$(fm_watcher_beat_value "$beat" 'fm-home')
+  case "$lock_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ -n "$lock_identity" ] || return 1
+  [ "$beat_pid" = "$lock_pid" ] || return 1
+  [ "$beat_ident" = "$lock_identity" ] || return 1
+  fm_paths_equivalent "$lock_home" "$fm_home" || return 1
+  fm_paths_equivalent "$lock_path" "$watcher_path" || return 1
+  fm_paths_equivalent "$beat_home" "$fm_home" || return 1
+  fm_paths_equivalent "$beat_path" "$watcher_path" || return 1
+}
+
 fm_watcher_lock_matches_pid() {  # <lockdir> <pid> <watcher-path> <fm-home>
   local lockdir=$1 pid=$2 watcher_path=$3 fm_home=$4 lock_home lock_path lock_identity current_identity
   lock_home=$(cat "$lockdir/fm-home" 2>/dev/null || true)
