@@ -44,21 +44,26 @@ pidfile_alive() {
   return 1
 }
 
-afk_created=0
 enable_afk() {
-  if [ ! -e "$STATE/.afk" ]; then
-    afk_created=1
-  fi
   date '+%s' > "$STATE/.afk"
 }
 
 fail_startup() {
   local msg=$1
-  if [ "$afk_created" -eq 1 ]; then
-    rm -f "$STATE/.afk" 2>/dev/null || true
-  fi
+  rm -f "$STATE/.afk" 2>/dev/null || true
   echo "$msg" >&2
   exit 1
+}
+
+remove_rejected_lock() {
+  local rejected_pid=$1 lock_pid
+  case "$rejected_pid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ -e "$LOCK" ] || [ -L "$LOCK" ] || return 0
+  lock_pid=$(cat "$LOCK/pid" 2>/dev/null || true)
+  [ "$lock_pid" = "$rejected_pid" ] || return 0
+  fm_lock_remove_path "$LOCK" 2>/dev/null || rm -rf "$LOCK" 2>/dev/null || true
 }
 
 append_env_assignment() {
@@ -83,7 +88,9 @@ if [ -s "$PIDFILE" ] && pidfile_alive; then
   printf 'afk: daemon healthy pid=%s\n' "$(cat "$PIDFILE")"
   exit 0
 fi
+rejected_pid=$(cat "$PIDFILE" 2>/dev/null || true)
 rm -f "$PIDFILE" 2>/dev/null || true
+remove_rejected_lock "$rejected_pid"
 
 command -v tmux >/dev/null 2>&1 || {
   fail_startup "error: tmux is required to start the afk supervise daemon"
@@ -131,7 +138,5 @@ if [ -s "$LAUNCH_LOG" ]; then
   echo "launch log:" >&2
   tail -40 "$LAUNCH_LOG" >&2
 fi
-if [ "$afk_created" -eq 1 ]; then
-  rm -f "$STATE/.afk" 2>/dev/null || true
-fi
+rm -f "$STATE/.afk" 2>/dev/null || true
 exit 1

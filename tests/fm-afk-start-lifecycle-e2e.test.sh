@@ -165,6 +165,7 @@ reset_runtime_state() {
 
 test_afk_start_failure_does_not_leave_afk_active() {
   reset_runtime_state
+  date '+%s' > "$STATE_DIR/.afk"
   PATH="$TMUX_SHIM_DIR:$PATH" \
   FM_STATE_OVERRIDE="$STATE_DIR" \
   FM_SUPERVISOR_TARGET="%999999" \
@@ -240,6 +241,8 @@ test_afk_start_rejects_stale_live_pidfile() {
   reset_runtime_state
   sleep 60 &
   local stale_pid=$!
+  mkdir "$STATE_DIR/.supervise-daemon.lock"
+  printf '%s\n' "$stale_pid" > "$STATE_DIR/.supervise-daemon.lock/pid"
   printf '%s\n' "$stale_pid" > "$STATE_DIR/.supervise-daemon.pid"
 
   PATH="$TMUX_SHIM_DIR:$PATH" \
@@ -263,6 +266,10 @@ test_afk_start_rejects_stale_live_pidfile() {
   if [ -z "$daemon_pid" ] || ! kill -0 "$daemon_pid" 2>/dev/null; then
     fail "fm-afk-start did not replace stale pidfile with a live daemon"
   fi
+  local lock_pid
+  lock_pid=$(cat "$STATE_DIR/.supervise-daemon.lock/pid" 2>/dev/null || true)
+  [ "$lock_pid" = "$daemon_pid" ] \
+    || fail "fm-afk-start did not replace stale daemon lock"
   pass "fm-afk-start rejects stale live pidfiles"
 }
 
