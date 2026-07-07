@@ -27,7 +27,7 @@ make_fake_toolchain() {
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
-  exit 0
+  exit "${FM_FAKE_GH_AUTH_STATUS_EXIT:-0}"
 fi
 exit 0
 SH
@@ -158,6 +158,42 @@ ROWS
   pass "bootstrap enforces no-mistakes minimum version"
 }
 
+test_gh_auth_probe_accepts_sandbox_local_token() {
+  local case_dir fakebin out
+
+  case_dir="$TMP_ROOT/gh-auth-missing"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/home" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_AUTH_STATUS_EXIT=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ "$out" = "NEEDS_GH_AUTH" ] || fail "failed gh auth without local token should report NEEDS_GH_AUTH, got: $out"
+
+  case_dir="$TMP_ROOT/gh-auth-sandbox-token"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/.config/gh"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  cat > "$case_dir/home/.config/gh/hosts.yml" <<'YAML'
+github.com:
+    oauth_token: gho_fake
+    user: eppixdev
+    git_protocol: ssh
+YAML
+  fakebin=$(make_fake_toolchain "$case_dir")
+  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/home" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_AUTH_STATUS_EXIT=1 CODEX_SANDBOX_NETWORK_DISABLED=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "sandbox gh auth failure with local token should stay silent, got: $out"
+
+  case_dir="$TMP_ROOT/gh-auth-env-token"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/home" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_AUTH_STATUS_EXIT=1 GH_TOKEN=gho_fake "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "GH_TOKEN should satisfy bootstrap gh auth, got: $out"
+
+  pass "bootstrap gh auth probe tolerates sandboxed status failures with local credentials"
+}
+
 test_orca_backend_gates_orca_tool_only_when_selected() {
   local case_dir fakebin out missing_orca
   missing_orca="MISSING: orca (install: brew install orca  # or the platform's package manager)"
@@ -230,6 +266,7 @@ ROWS
 
 test_bootstrap_reporting
 test_no_mistakes_min_version
+test_gh_auth_probe_accepts_sandbox_local_token
 test_orca_backend_gates_orca_tool_only_when_selected
 if [ "$HAVE_JQ" -eq 1 ]; then
   test_crew_dispatch_active_rules_are_surfaced
