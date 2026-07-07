@@ -35,6 +35,12 @@
 #          config/backlog-backend=manual, a missing or incompatible tasks-axi is
 #          reported through the MISSING line and backlog operations fall back to
 #          manual editing until the captain approves installation.
+#          GitHub auth detection trusts "gh auth status" first, then GH_TOKEN or
+#          GITHUB_TOKEN, and in a Codex session with
+#          CODEX_SANDBOX_NETWORK_DISABLED=1 falls back to a local
+#          "${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}/hosts.yml"
+#          oauth_token entry so sandboxed gh-status failures do not false-report
+#          NEEDS_GH_AUTH.
 #          X mode is OPTIONAL and inert unless FM_HOME/.env has a non-empty
 #          FMX_PAIRING_TOKEN. When opted in, bootstrap requires curl+jq, writes
 #          the relay poll shim and 30s cadence config, and prints an FMX line.
@@ -385,6 +391,31 @@ crew_dispatch_validate() {
   ' "$file"
 }
 
+gh_hosts_has_token() {
+  local config_dir hosts
+  if [ -n "${GH_CONFIG_DIR:-}" ]; then
+    config_dir=$GH_CONFIG_DIR
+  else
+    config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/gh"
+  fi
+  hosts="$config_dir/hosts.yml"
+  [ -r "$hosts" ] || return 1
+  awk '
+    BEGIN { in_github = 0; found = 0 }
+    /^github[.]com:[[:space:]]*$/ { in_github = 1; next }
+    /^[^[:space:]][^:]*:[[:space:]]*$/ { in_github = 0 }
+    in_github && $1 == "oauth_token:" && $2 != "" { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$hosts"
+}
+
+gh_auth_available() {
+  gh auth status >/dev/null 2>&1 && return 0
+  [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ] && return 0
+  [ "${CODEX_SANDBOX_NETWORK_DISABLED:-}" = 1 ] && gh_hosts_has_token && return 0
+  return 1
+}
+
 if [ "${1:-}" = "install" ]; then
   shift
   [ $# -gt 0 ] || { echo "usage: fm-bootstrap.sh install <tool>..." >&2; exit 1; }
@@ -406,7 +437,7 @@ fi
 if command -v no-mistakes >/dev/null 2>&1 && ! no_mistakes_compatible; then
   echo "MISSING: no-mistakes (install: $(install_cmd no-mistakes))"
 fi
-gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
+gh_auth_available || echo "NEEDS_GH_AUTH"
 # Worktree-tangle check: the firstmate primary checkout (FM_ROOT) must sit on its
 # default branch, not a feature branch (see fm-tangle-lib.sh). Scoped to the
 # primary only; detached-HEAD worktrees and secondmate homes never trip it.

@@ -55,10 +55,12 @@ Full detail on every feature lives in [docs/architecture.md](docs/architecture.m
 ## Quick Start
 
 **Requirements:** a verified agent harness (claude, codex, opencode, pi, or grok), git with GitHub auth, and tmux for the reference session backend.
+GitHub auth can come from `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN`.
+In a Codex session with `CODEX_SANDBOX_NETWORK_DISABLED=1`, firstmate also accepts a local `gh` login recorded in `hosts.yml` when `gh auth status` itself cannot complete.
 The first mate detects and offers to install everything else.
 
 ```sh
-gh auth login
+gh auth login   # or export GH_TOKEN / GITHUB_TOKEN before launch
 git clone https://github.com/kunchenguid/firstmate
 cd firstmate && claude   # launch your harness here; AGENTS.md takes over
 ```

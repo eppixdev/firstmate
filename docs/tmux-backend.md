@@ -13,7 +13,8 @@ Pick tmux unless you have a specific reason to try an experimental backend (herd
 
 - tmux itself: `brew install tmux` (or your platform's package manager).
 - A verified crew harness: `claude`, `codex`, `opencode`, `pi`, or `grok`.
-- `git` with GitHub auth (`gh auth login`).
+- `git` with GitHub auth via `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN`.
+- In a Codex session with `CODEX_SANDBOX_NETWORK_DISABLED=1`, firstmate also accepts a local `gh` login recorded in `hosts.yml` when `gh auth status` cannot complete.
 - `node`, required by firstmate's universal toolchain.
 - `treehouse` for pooling clean worktrees; `no-mistakes` for the validation pipeline; `gh-axi`, `chrome-devtools-axi`, and `lavish-axi` for GitHub, browser, and rich-review operations.
 
