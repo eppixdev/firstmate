@@ -46,6 +46,10 @@ mkdir -p "$STATE"
 # has one definition.
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
+# Supervisor-owned lifecycle reconciliation (durable PR-ready / merged / scout
+# completion facts plus cleanup follow-through).
+# shellcheck source=bin/fm-lifecycle-lib.sh
+. "$SCRIPT_DIR/fm-lifecycle-lib.sh"
 # The DEFAULT EVENT SOURCE: this watcher's poll loop over the pull primitives
 # (capture, recorded windows, backend busy-state, and the BUSY_REGEX fallback)
 # synthesizes the signal/stale/check/heartbeat wake vocabulary for backends with
@@ -413,6 +417,10 @@ while :; do
   # mtime prove this watcher is alive. Supervision scripts warn when this goes
   # stale or no longer matches the recorded watcher with tasks in flight.
   fm_watcher_beat_write "$STATE/.last-watcher-beat" "$WATCHER_PID" "$WATCH_PATH" "$FM_HOME" || true
+
+  # Reconcile supervisor-owned lifecycle facts before scanning signals so any
+  # newly-written durable status line is picked up by this same cycle.
+  fm_lifecycle_reconcile watcher "$STATE" >/dev/null 2>&1 || true
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.

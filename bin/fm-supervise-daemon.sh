@@ -119,6 +119,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # classification predicates have exactly one definition.
 # shellcheck source=bin/fm-classify-lib.sh
 . "$FM_DAEMON_DIR/fm-classify-lib.sh"
+# shellcheck source=bin/fm-lifecycle-lib.sh
+. "$FM_DAEMON_DIR/fm-lifecycle-lib.sh"
 
 # --- tunables ---------------------------------------------------------------
 FM_SUPERVISOR_TARGET_DEFAULT="firstmate:0"
@@ -513,6 +515,11 @@ _oldest_line_age() {  # <buf> -> seconds since the oldest buffered item first ar
 housekeeping() {  # <state>
   local state=$1 now due f key task win marker age last max_defer oldest
   now=$(_now)
+
+  # Supervisor-owned lifecycle reconciliation: discover PR-ready / merged /
+  # scout-complete tasks from durable facts, then drive cleanup only after the
+  # corresponding status has already been surfaced.
+  fm_lifecycle_reconcile daemon "$state" >/dev/null 2>&1 || true
 
   # (1) batch flush
   if [ "${FM_ESCALATE_BATCH_SECS:-$ESCALATE_BATCH_SECS_DEFAULT}" -le 0 ]; then
