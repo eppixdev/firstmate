@@ -24,14 +24,16 @@ batched digest rather than per-wake injections.
    flag is present.
 
 2. **Ensure the sub-supervisor daemon is running.** Check the pid file; start
-   the daemon only if it is dead or absent:
+   the daemon only if it is dead or absent by using the durable start helper:
    ```sh
-   if [ -f state/.supervise-daemon.pid ] && kill -0 "$(cat state/.supervise-daemon.pid)" 2>/dev/null; then
-     : # daemon already alive - it picks up the flag on its next cycle
-   else
-     nohup bin/fm-supervise-daemon.sh >/dev/null 2>&1 &
-   fi
+   bin/fm-afk-start.sh
    ```
+   Do not replace this with a manual `nohup ... &`.
+   Some harnesses clean up descendants of a completed tool command, which can
+   kill a manually backgrounded daemon and leave `state/.afk` active with no
+   long-lived watcher owner.
+   The helper launches through the tmux server and verifies the daemon pid, so
+   the process survives the command that started it.
    The daemon is **presence-gated**: it injects escalations only while
    `state/.afk` exists, and stays quiet otherwise.
 
