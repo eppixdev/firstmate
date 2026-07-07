@@ -13,7 +13,8 @@ Prerequisites:
 - The Orca app installed at `/Applications/Orca.app`, and **running**.
 - The `orca` CLI: `brew install orca`.
 - `node`, used by firstmate's adapter to parse Orca's JSON output and to gate spawns on runtime readiness.
-- `git` with GitHub auth, `no-mistakes`, `gh-axi`, `chrome-devtools-axi`, and `lavish-axi` - the same universal requirements as tmux, minus `tmux` and `treehouse` (Orca replaces both).
+- `git` with GitHub auth via `gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN`, plus `no-mistakes`, `gh-axi`, `chrome-devtools-axi`, and `lavish-axi` - the same universal requirements as tmux, minus `tmux` and `treehouse` (Orca replaces both).
+- In a Codex session with `CODEX_SANDBOX_NETWORK_DISABLED=1`, firstmate also accepts a local `gh` login recorded in `hosts.yml` when `gh auth status` cannot complete.
 
 Select Orca by putting `orca` in a local `config/backend` file - the durable way to pick it - or by exporting `FM_BACKEND=orca` when you launch your harness for a one-off session; telling the first mate in chat to use Orca also works.
 It is never auto-detected.

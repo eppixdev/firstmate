@@ -35,6 +35,12 @@
 #          config/backlog-backend=manual, a missing or incompatible tasks-axi is
 #          reported through the MISSING line and backlog operations fall back to
 #          manual editing until the captain approves installation.
+#          GitHub auth detection trusts "gh auth status" first, then GH_TOKEN or
+#          GITHUB_TOKEN, and in a Codex session with
+#          CODEX_SANDBOX_NETWORK_DISABLED=1 falls back to a local
+#          "${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}/hosts.yml"
+#          oauth_token entry so sandboxed gh-status failures do not false-report
+#          NEEDS_GH_AUTH.
 #          X mode is OPTIONAL and inert unless FM_HOME/.env has a non-empty
 #          FMX_PAIRING_TOKEN. When opted in, bootstrap requires curl+jq, writes
 #          the relay poll shim and 30s cadence config, and prints an FMX line.
