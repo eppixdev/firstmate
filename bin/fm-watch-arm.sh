@@ -152,6 +152,7 @@ done
 
 if [ "$keepalive" -eq 1 ] && [ -z "${FM_WATCH_ARM_KEEPALIVE_CHILD:-}" ]; then
   keepalive_child=
+  # shellcheck disable=SC2329
   cleanup_keepalive_child() {
     if [ -n "$keepalive_child" ] && fm_pid_alive "$keepalive_child"; then
       kill -TERM "$keepalive_child" 2>/dev/null || true

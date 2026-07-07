@@ -16,29 +16,25 @@ batched digest rather than per-wake injections.
 
 ## What it does
 
-1. **Set the durable away-mode flag:**
+1. **Enter away mode through the durable start helper:**
    ```sh
-   date '+%s' > state/.afk
+   bin/fm-afk-start.sh
    ```
-   This file survives a firstmate restart: recovery re-enters afk if the
-   flag is present.
-
-2. **Ensure the sub-supervisor daemon is running.** Check the pid file; start
-   the daemon only if it is dead or absent:
-   ```sh
-   if [ -f state/.supervise-daemon.pid ] && kill -0 "$(cat state/.supervise-daemon.pid)" 2>/dev/null; then
-     : # daemon already alive - it picks up the flag on its next cycle
-   else
-     nohup bin/fm-supervise-daemon.sh >/dev/null 2>&1 &
-   fi
-   ```
+   The helper is the only writer for entering away mode: it sets `state/.afk` only when an existing daemon is confirmed healthy or a new daemon has reached the launch path, and removes a newly created flag if startup cannot be confirmed.
+   This file survives a firstmate restart: recovery re-enters afk if the flag is present.
+   Do not replace this with a manual `nohup ... &`.
+   Some harnesses clean up descendants of a completed tool command, which can
+   kill a manually backgrounded daemon and leave `state/.afk` active with no
+   long-lived watcher owner.
+   The helper launches through the tmux server and verifies the daemon pid, so
+   the process survives the command that started it.
    The daemon is **presence-gated**: it injects escalations only while
    `state/.afk` exists, and stays quiet otherwise.
 
-3. **Do not separately arm `fm-watch.sh`.** The daemon manages the watcher as
+2. **Do not separately arm `fm-watch.sh`.** The daemon manages the watcher as
    its child; the singleton lock no-ops a stray arm harmlessly.
 
-4. **Acknowledge** to the captain that away-mode is active: the daemon will
+3. **Acknowledge** to the captain that away-mode is active: the daemon will
    self-handle routine wakes, escalate only captain-relevant events, and the
    captain can exit by sending any real message.
 
