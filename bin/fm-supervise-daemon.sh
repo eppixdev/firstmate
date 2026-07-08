@@ -424,6 +424,7 @@ classify_unknown() {  # <reason>
 # --- stale marker + escalation buffer (stateful, but via explicit state dir) -
 # Marker:   state/.subsuper-stale-<key>   contains the epoch first seen idle.
 # Buffer:   state/.subsuper-escalations    one distilled line per escalation.
+# Urgent:   state/.subsuper-escalations.urgent  first urgent append epoch.
 # Seen:     state/.subsuper-seen-status-<task>  last status line the scan
 #           escalated, so the catch-all does not re-fire the same terminal.
 
@@ -440,6 +441,18 @@ stale_marker_remove() {  # <window> <state>
   local win=$1 state=$2 key
   key=$(_stale_key "$(window_to_task "$win" "$state")")
   rm -f "$state/.subsuper-stale-$key"
+}
+
+escalation_item_is_urgent() {  # <distilled-item>
+  printf '%s\n' "$1" | grep -qiE '(^|: )(blocked|needs-decision):'
+}
+
+escalation_buffer_has_urgent() {  # <state>
+  local state=$1 buf
+  buf="$state/.subsuper-escalations"
+  [ -s "$state/.subsuper-escalations.urgent" ] && return 0
+  [ -s "$buf" ] || return 1
+  grep -qiE '(^|: )(blocked|needs-decision):' "$buf"
 }
 
 # Record the seen-status marker for a captain-relevant status line so the
@@ -539,6 +552,9 @@ escalate_add() {  # <state> <distilled-item>
   local state=$1 item=$2 buf
   buf="$state/.subsuper-escalations"
   [ -s "$buf" ] || _now > "${buf}.since"
+  if escalation_item_is_urgent "$item"; then
+    [ -s "${buf}.urgent" ] || _now > "${buf}.urgent"
+  fi
   printf '%s\n' "$item" >> "$buf"
 }
 
@@ -555,7 +571,32 @@ escalate_flush() {  # <state>
   # Single-line wrapper: no embedded newlines (inject_msg also collapses as a
   # safety net, but keeping the source single-line makes the intent explicit).
   msg=$(printf 'Supervisor escalate (%s event(s)): %s (pre-read; re-arm not needed — watcher daemon-managed)' "$n" "$msg")
-  if inject_msg "$msg" "$state"; then : > "$buf"; rm -f "${buf}.since" "$state/.subsuper-inject-wedged"; return 0; fi
+  if inject_msg "$msg" "$state"; then
+    : > "$buf"
+    rm -f "${buf}.since" "${buf}.urgent" "$state/.subsuper-inject-wedged"
+    return 0
+  fi
+  return 1
+}
+
+startup_reconcile_escalations() {  # <state>
+  local state=$1 buf oldest
+  buf="$state/.subsuper-escalations"
+  [ -s "$buf" ] || return 0
+  oldest=$(_oldest_line_age "$buf")
+  if escalation_buffer_has_urgent "$state"; then
+    log "startup reconcile: urgent away-mode escalations buffered for ${oldest}s; forcing immediate flush"
+    if escalate_flush "$state"; then
+      return 0
+    fi
+    inject_wedge_alarm "$state" "$oldest"
+    return 1
+  fi
+  log "startup reconcile: away-mode escalations buffered for ${oldest}s; forcing immediate flush"
+  if escalate_flush "$state"; then
+    return 0
+  fi
+  log "startup reconcile deferred: buffered away-mode escalations remain queued for retry/catch-up"
   return 1
 }
 
@@ -619,6 +660,13 @@ housekeeping() {  # <state>
   # scout-complete tasks from durable facts, then drive cleanup only after the
   # corresponding status has already been surfaced.
   fm_lifecycle_reconcile daemon "$state" >/dev/null 2>&1 || true
+
+  if afk_active "$state" && escalation_buffer_has_urgent "$state"; then
+    oldest=$(_oldest_line_age "$state/.subsuper-escalations")
+    if ! escalate_flush "$state"; then
+      inject_wedge_alarm "$state" "$oldest"
+    fi
+  fi
 
   # (1) batch flush
   if [ "${FM_ESCALATE_BATCH_SECS:-$ESCALATE_BATCH_SECS_DEFAULT}" -le 0 ]; then
@@ -832,7 +880,13 @@ handle_wake() {  # <reason> <state>
     # housekeeping re-escalates the same pane as a false wedge later.
     [ "$kind" = "stale" ] && stale_marker_remove "$arg" "$state"
     mark_escalated_seen "$kind" "$arg" "$state"
-    [ "${FM_ESCALATE_BATCH_SECS:-$ESCALATE_BATCH_SECS_DEFAULT}" -le 0 ] && { escalate_flush "$state" || true; }
+    if escalation_item_is_urgent "$distilled"; then
+      if ! escalate_flush "$state" && afk_active "$state"; then
+        inject_wedge_alarm "$state" "$(_oldest_line_age "$state/.subsuper-escalations")"
+      fi
+    elif [ "${FM_ESCALATE_BATCH_SECS:-$ESCALATE_BATCH_SECS_DEFAULT}" -le 0 ]; then
+      escalate_flush "$state" || true
+    fi
   else
     # Transient (non-terminal) stale: record/refresh the marker so housekeeping
     # can age it; the persistence recheck, not this wake, escalates a wedge.
@@ -974,6 +1028,7 @@ fm_super_main() {
   local afk_status="off"
   afk_active "$STATE" && afk_status="on"
   log "daemon starting (pid $$); target=$TARGET; target_source=$target_source; backend=$BACKEND; backend_source=$backend_source; afk=$afk_status; inject_skip='${FM_INJECT_SKIP:-$INJECT_SKIP_DEFAULT}'; stale_escalate=${FM_STALE_ESCALATE_SECS:-$STALE_ESCALATE_SECS_DEFAULT}s; batch=${FM_ESCALATE_BATCH_SECS:-$ESCALATE_BATCH_SECS_DEFAULT}s"
+  startup_reconcile_escalations "$STATE" || true
 
   # --- shutdown: flush buffered escalations, reap child, release lock -------
   local WATCHER_PID="" CUR_TMP=""

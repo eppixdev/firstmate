@@ -108,7 +108,7 @@ test_discovers_pr_ready_and_arms_poll() {
 
 test_merged_issue_closes_issue_then_tears_down_after_seen() {
   local dir state data id trigger pending
-  id=issue-30-price-history-semantics
+  id='issue-30-price-history-semantics'
   dir=$(make_case merged-cleanup "$id" ship no-mistakes)
   state="$dir/state"
   data="$dir/data"

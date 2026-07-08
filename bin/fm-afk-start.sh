@@ -21,6 +21,8 @@ CONFIRM_TIMEOUT=${FM_AFK_START_CONFIRM_TIMEOUT:-10}
 
 # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-tmux-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-tmux-lib.sh"
 
 shell_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
@@ -53,6 +55,17 @@ fail_startup() {
   rm -f "$STATE/.afk" 2>/dev/null || true
   echo "$msg" >&2
   exit 1
+}
+
+reject_stale_afk_state() {
+  local target=$1 composer_state
+  if [ -s "$STATE/.subsuper-inject-wedged" ]; then
+    fail_startup "error: afk entry refused because a prior away-mode escalation is still wedged; review $STATE/.subsuper-inject-wedged and clear the buffered supervisor state before retrying"
+  fi
+  composer_state=$(fm_tmux_composer_state "$target")
+  if [ "$composer_state" = pending ]; then
+    fail_startup "error: afk entry refused because the supervisor composer already has pending input; submit or clear it before retrying /afk"
+  fi
 }
 
 remove_rejected_lock() {
@@ -100,6 +113,7 @@ target="${FM_SUPERVISOR_TARGET:-${TMUX_PANE:-firstmate:0}}"
 if ! tmux_target_resolves "$target"; then
   fail_startup "error: supervisor target '$target' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET"
 fi
+reject_stale_afk_state "$target"
 
 cmd="cd $(shell_quote "$FM_ROOT") && exec env"
 cmd="$cmd PATH=$(shell_quote "$PATH")"
