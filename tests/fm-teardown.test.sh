@@ -256,6 +256,31 @@ SH
   chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
 }
 
+add_git_fetch_and_merge_tree_failure_wrapper() {
+  local case_dir=$1 real_git
+  real_git=$(command -v git)
+  cat > "$case_dir/fakebin/git" <<SH
+#!/usr/bin/env bash
+orig=( "\$@" )
+args=( "\$@" )
+if [ "\${args[0]:-}" = -C ]; then
+  args=( "\${args[@]:2}" )
+fi
+case "\${args[0]:-}" in
+  fetch)
+    echo "error: synthetic fetch failure" >&2
+    exit 1
+    ;;
+  merge-tree)
+    echo "error: synthetic merge-tree failure" >&2
+    exit 1
+    ;;
+esac
+exec "$real_git" "\${orig[@]}"
+SH
+  chmod +x "$case_dir/fakebin/git"
+}
+
 # Run teardown with PATH mocking. Args: case_dir [extra args...]
 run_teardown() {
   local case_dir=$1; shift
@@ -610,6 +635,25 @@ test_content_fallback_refreshes_stale_origin_ref() {
   pass "content fallback refreshes origin default before comparing trees"
 }
 
+test_content_fallback_allows_equal_local_tree_without_fetch_or_merge_tree() {
+  local case_dir rc
+  case_dir=$(make_case content-local-tree)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  land_on_origin_main "$case_dir" feature.txt hello
+  git -C "$case_dir/project" fetch -q origin main
+  add_git_fetch_and_merge_tree_failure_wrapper "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "content-local-tree: teardown should succeed when HEAD tree already matches the local default ref"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "content-local-tree: teardown printed a REFUSED line"
+  pass "content fallback accepts an equal local default-branch tree without fetch or merge-tree"
+}
+
 test_dirty_worktree_refuses() {
   local case_dir rc pr_head
   case_dir=$(make_case dirty-wt)
@@ -688,5 +732,6 @@ test_pr_check_does_not_refresh_stale_pr_head
 test_pr_check_records_remote_head_when_local_lags
 test_content_in_default_fallback_allows
 test_content_fallback_refreshes_stale_origin_ref
+test_content_fallback_allows_equal_local_tree_without_fetch_or_merge_tree
 test_dirty_worktree_refuses
 test_gh_error_and_content_absent_refuses
