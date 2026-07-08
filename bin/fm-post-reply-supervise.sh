@@ -3,7 +3,7 @@
 # is still in flight.
 # This deliberately reuses the ordinary turn-sync path so queued wakes are
 # consumed the same way every other turn handles them, then it surfaces the next
-# actionable parked/blocked gate if one is present.
+# actionable follow-up if one is present.
 # If a crew is still provably active and its status log did not advance during
 # that pass, also do one bounded pane peek so a pane-only reply is not missed.
 set -u
@@ -29,15 +29,6 @@ status_signature() {  # <status-file>
     mtime=$(stat -c %Y "$file" 2>/dev/null || true)
   fi
   printf '%s:%s\n' "${size:-?}" "${mtime:-?}"
-}
-
-crew_is_still_active() {  # <id>
-  local line
-  line=$("$FM_CREW_STATE_BIN" "$1" 2>/dev/null || true)
-  case "$line" in
-    state:\ working*"source: run-step"*|state:\ working*"source: pane"*) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 trim_line() {  # <line>

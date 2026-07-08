@@ -53,6 +53,22 @@ test_turn_sync_surfaces_next_actionable_gate() {
   pass "turn sync surfaces the next actionable parked gate"
 }
 
+test_turn_sync_surfaces_terminal_completion_until_teardown() {
+  local dir state out fakebin
+  dir=$(make_case turn-sync-terminal-next-action)
+  state="$dir/state"
+  out="$dir/out"
+  fakebin="$dir/fakebin"
+
+  printf 'window=test:fm-task\nkind=ship\n' > "$state/task.meta"
+
+  FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_FAKE_CREW_STATE='state: done · source: status-log · ready for teardown after merge' \
+    "$TURN_SYNC" > "$out" 2>&1 || fail "turn sync should succeed when surfacing a terminal follow-up"
+
+  assert_contains "$(cat "$out")" "NEXT ACTION: task - state: done" "turn sync did not surface the terminal completion follow-up"
+  pass "turn sync surfaces a terminal completion follow-up until teardown"
+}
+
 test_post_reply_supervise_reuses_turn_sync_path() {
   local dir state out fakebin
   dir=$(make_case post-reply-supervise)
@@ -139,6 +155,7 @@ SH
 test_turn_sync_drains_pending_queue
 test_turn_sync_runs_guard_when_queue_empty
 test_turn_sync_surfaces_next_actionable_gate
+test_turn_sync_surfaces_terminal_completion_until_teardown
 test_post_reply_supervise_reuses_turn_sync_path
 test_post_reply_supervise_peeks_active_pane_when_status_is_unchanged
 test_post_reply_supervise_steers_run_head_drift_once
