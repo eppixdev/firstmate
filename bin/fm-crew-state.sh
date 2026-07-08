@@ -121,6 +121,7 @@ map_log_state() {  # <verb>
 
 LOG_LINE=$(log_last_line || true)
 LOG_VERB=$(log_verb_of "$LOG_LINE")
+LOCAL_HEAD=$(git -C "$WT" rev-parse HEAD 2>/dev/null || true)
 
 # pane_readable is consulted ONLY in the no-run fallback below. The run-step path
 # stays authoritative regardless of pane liveness - judge by the run-step, not the
@@ -273,6 +274,24 @@ nm_gate_findings_count() {
   case "$rest" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s' "$rest"
 }
+short_sha() {
+  local sha
+  sha=$(strip_quotes "${1:-}")
+  case "$sha" in
+    ???????*) printf '%s' "${sha:0:7}" ;;
+    *)        printf '%s' "$sha" ;;
+  esac
+}
+run_head_drift_detail() {  # <run-head>
+  local run_head=$1 local_short run_short
+  [ -n "$run_head" ] || return 1
+  [ -n "$LOCAL_HEAD" ] || return 1
+  git -C "$WT" cat-file -e "${run_head}^{commit}" 2>/dev/null || return 1
+  [ "$run_head" = "$LOCAL_HEAD" ] && return 1
+  local_short=$(short_sha "$LOCAL_HEAD")
+  run_short=$(short_sha "$run_head")
+  printf 'run-head drift: local-head=%s run-head=%s sync required before reviewing fix round' "$local_short" "$run_short"
+}
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
   case "$(log_note_of "$LOG_LINE")" in
@@ -387,6 +406,7 @@ if [ "$HAVE_RUN" = 1 ]; then
   else
     status=$(strip_quotes "$(nm_field status)")
     outcome=$(strip_quotes "$(nm_field outcome)")
+    run_head=$(strip_quotes "$(nm_field head)")
     awaiting=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*awaiting_agent:' | head -1 || true)
     gate_status=$(nm_gate_status)
     has_gate=0
@@ -401,6 +421,12 @@ if [ "$HAVE_RUN" = 1 ]; then
         *)             RUN_STATE=unknown; RUN_DETAIL="outcome: $outcome" ;;
       esac
     elif [ -n "$awaiting" ] || [ "$status" = awaiting_approval ] || [ "$status" = fix_review ] || [ -n "$gate_status" ] || [ "$has_gate" = 1 ]; then
+      if [ "$status" = fix_review ] || [ "$gate_status" = fix_review ]; then
+        drift_detail=$(run_head_drift_detail "$run_head" || true)
+        if [ -n "$drift_detail" ]; then
+          emit blocked run-step "$drift_detail"
+        fi
+      fi
       if [ "$has_gate" = 1 ]; then
         gate=$(nm_gate_line_name)
       else

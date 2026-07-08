@@ -13,6 +13,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 FM_CREW_STATE_BIN="${FM_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
+FM_SEND_BIN="${FM_SEND_BIN:-$SCRIPT_DIR/fm-send.sh}"
 FM_POST_REPLY_PEEK_LINES="${FM_POST_REPLY_PEEK_LINES:-40}"
 
 # shellcheck source=bin/fm-backend.sh
@@ -46,6 +47,34 @@ trim_line() {  # <line>
   printf '%s' "$s"
 }
 
+run_head_sync_marker() {  # <id>
+  printf '%s/.run-head-sync-%s' "$STATE" "$1"
+}
+
+extract_run_head_token() {  # <crew-state line> <token>
+  printf '%s\n' "$1" | sed -n "s/.*$2=\\([^ ·]*\\).*/\\1/p" | head -1
+}
+
+maybe_send_run_head_sync() {  # <id> <crew-state line>
+  local id=$1 line=$2 run_head local_head marker sent
+  case "$line" in
+    state:\ blocked*"source: run-step"*"run-head drift:"*) ;;
+    *)
+      rm -f "$(run_head_sync_marker "$id")"
+      return 0
+      ;;
+  esac
+  run_head=$(extract_run_head_token "$line" "run-head")
+  local_head=$(extract_run_head_token "$line" "local-head")
+  [ -n "$run_head" ] || return 0
+  marker=$(run_head_sync_marker "$id")
+  [ "$(cat "$marker" 2>/dev/null || true)" = "$run_head" ] && return 0
+  sent="no-mistakes advanced the run head to $run_head while your local checkout is still at $local_head. Sync to the current run head with a safe fast-forward now: git fetch no-mistakes && git merge --ff-only $run_head. If the fast-forward refuses, inspect the checkout and then continue the fix review from the updated branch."
+  "$FM_SEND_BIN" "fm-$id" "$sent" >/dev/null 2>&1 || return 0
+  printf '%s\n' "$run_head" > "$marker"
+  printf 'SYNC STEER: %s - local %s behind run head %s\n' "$id" "${local_head:-unknown}" "$run_head"
+}
+
 meaningful_pane_line() {  # stdin: pane capture
   local line trimmed
   while IFS= read -r line; do
@@ -76,7 +105,12 @@ for meta in "$STATE"/*.meta; do
   [ -e "$meta" ] || continue
   id=$(basename "$meta")
   id=${id%.meta}
-  crew_is_still_active "$id" || continue
+  line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null || true)
+  maybe_send_run_head_sync "$id" "$line"
+  case "$line" in
+    state:\ working*"source: run-step"*|state:\ working*"source: pane"*) ;;
+    *) continue ;;
+  esac
   before=$(cat "$SNAPSHOT_DIR/$id.sig" 2>/dev/null || printf 'absent\n')
   after=$(status_signature "$STATE/$id.status")
   [ "$before" = "$after" ] || continue

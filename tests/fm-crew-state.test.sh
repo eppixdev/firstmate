@@ -239,6 +239,26 @@ steps[3]{step,status,findings,duration_ms}:
 EOF
 }
 
+run_parked_in_gate_block_at_head() {  # <branch> <head>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  head: "$2"
+  pr: ""
+  findings[1]{id,severity,file,line,action,description}:
+    r1,error,b.go,,ask-user,changes product behavior
+gate:
+  step: review
+  status: fix_review
+steps[3]{step,status,findings,duration_ms}:
+  intent,completed,0,0
+  review,fix_review,1,0
+  test,pending,0,0
+EOF
+}
+
 run_passed() {  # <branch>
   cat <<EOF
 run:
@@ -379,6 +399,29 @@ test_gate_block_parked_not_superseded() {
   assert_contains "$out" "1 finding(s)" "gate block wait includes finding count"
   assert_not_contains "$out" "superseded" "gate block wait not flagged stale"
   pass "gate block parked run is not flagged superseded"
+}
+
+test_fix_review_run_head_drift_blocks_for_sync() {
+  reset_fakes
+  local d drift_head out
+  d=$(new_case fix-review-drift)
+  make_repo_on_branch "$d/wt" fm/feat-sync
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-sync.meta" "window=fm:fm-feat-sync" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-sync.status"
+
+  git -C "$d/wt" checkout -q --detach
+  git -C "$d/wt" commit -q --allow-empty -m drift-head
+  drift_head=$(git -C "$d/wt" rev-parse HEAD)
+  git -C "$d/wt" checkout -q fm/feat-sync
+
+  FM_FAKE_AXI_STATUS="$(run_parked_in_gate_block_at_head fm/feat-sync "$drift_head")"
+  out=$(run_crew_state "$d" feat-sync)
+  assert_contains "$out" "state: blocked" "fix_review drift -> blocked"
+  assert_contains "$out" "source: run-step" "fix_review drift -> run-step source"
+  assert_contains "$out" "run-head drift:" "fix_review drift is surfaced explicitly"
+  assert_contains "$out" "sync required before reviewing fix round" "fix_review drift explains the recovery"
+  pass "fix_review run-head drift is surfaced as a sync-needed block"
 }
 
 test_ci_ready_done_log_beats_monitoring_run() {
@@ -784,6 +827,7 @@ test_stale_blocked_superseded
 test_genuine_parked_not_superseded
 test_scalar_gate_parked_not_superseded
 test_gate_block_parked_not_superseded
+test_fix_review_run_head_drift_blocks_for_sync
 test_ci_ready_done_log_beats_monitoring_run
 test_terminal_passed
 test_terminal_failed

@@ -95,8 +95,50 @@ test_post_reply_supervise_peeks_active_pane_when_status_is_unchanged() {
   pass "post-reply supervision peeks the live pane when status is unchanged"
 }
 
+test_post_reply_supervise_steers_run_head_drift_once() {
+  local dir state out fakebin sent marker
+  dir=$(make_case post-reply-run-head-drift)
+  state="$dir/state"
+  out="$dir/out"
+  fakebin="$dir/fakebin"
+  sent="$dir/sent.txt"
+  marker="$state/.run-head-sync-task"
+
+  cat > "$fakebin/fm-send.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\t%s\n' "$1" "${2:-}" >> "${FM_FAKE_SEND_LOG:?}"
+exit 0
+SH
+  chmod +x "$fakebin/fm-send.sh"
+
+  printf 'window=test:fm-task\nkind=ship\n' > "$state/task.meta"
+
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_SEND_BIN="$fakebin/fm-send.sh" FM_FAKE_SEND_LOG="$sent" \
+    FM_FAKE_CREW_STATE='state: blocked · source: run-step · run-head drift: local-head=abc1234 run-head=def5678 sync required before reviewing fix round' \
+    "$POST_REPLY" > "$out" 2>&1 || fail "post-reply supervision should succeed for run-head drift"
+
+  assert_contains "$(cat "$out")" "SYNC STEER: task - local abc1234 behind run head def5678" \
+    "post-reply supervision did not surface the sync steer"
+  assert_grep $'fm-task\tno-mistakes advanced the run head to def5678' "$sent" \
+    "post-reply supervision did not send the run-head sync instruction"
+  [ "$(cat "$marker" 2>/dev/null || true)" = "def5678" ] || fail "post-reply supervision did not record the steered run head"
+
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_SEND_BIN="$fakebin/fm-send.sh" FM_FAKE_SEND_LOG="$sent" \
+    FM_FAKE_CREW_STATE='state: blocked · source: run-step · run-head drift: local-head=abc1234 run-head=def5678 sync required before reviewing fix round' \
+    "$POST_REPLY" > "$out" 2>&1 || fail "second post-reply supervision should succeed for unchanged run-head drift"
+
+  [ "$(wc -l < "$sent" | tr -d '[:space:]')" = "1" ] || fail "post-reply supervision re-sent an unchanged run-head drift steer"
+  assert_not_contains "$(cat "$out")" "SYNC STEER:" "post-reply supervision should not repeat the same sync steer"
+  pass "post-reply supervision steers run-head drift once per run head"
+}
+
 test_turn_sync_drains_pending_queue
 test_turn_sync_runs_guard_when_queue_empty
 test_turn_sync_surfaces_next_actionable_gate
 test_post_reply_supervise_reuses_turn_sync_path
 test_post_reply_supervise_peeks_active_pane_when_status_is_unchanged
+test_post_reply_supervise_steers_run_head_drift_once
