@@ -72,7 +72,31 @@ test_post_reply_supervise_reuses_turn_sync_path() {
   pass "post-reply supervision drains wakes and surfaces the next gate"
 }
 
+test_post_reply_supervise_peeks_active_pane_when_status_is_unchanged() {
+  local dir state out fakebin capture
+  dir=$(make_case post-reply-pane-reply)
+  state="$dir/state"
+  out="$dir/out"
+  fakebin="$dir/fakebin"
+  capture="$dir/pane.txt"
+
+  printf '%s\n' \
+    'validation still running' \
+    'I found the monitoring gap in fm-post-reply-supervise.sh' > "$capture"
+  printf 'window=test:fm-task\nkind=ship\n' > "$state/task.meta"
+  printf 'working: validation still running\n' > "$state/task.status"
+
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)' \
+    FM_FAKE_TMUX_CAPTURE="$capture" "$POST_REPLY" > "$out" 2>&1 || fail "post-reply supervision should succeed for a live validating crew"
+
+  assert_contains "$(cat "$out")" "PANE REPLY: task - I found the monitoring gap in fm-post-reply-supervise.sh" \
+    "post-reply supervision did not surface the pane-only reply"
+  pass "post-reply supervision peeks the live pane when status is unchanged"
+}
+
 test_turn_sync_drains_pending_queue
 test_turn_sync_runs_guard_when_queue_empty
 test_turn_sync_surfaces_next_actionable_gate
 test_post_reply_supervise_reuses_turn_sync_path
+test_post_reply_supervise_peeks_active_pane_when_status_is_unchanged
