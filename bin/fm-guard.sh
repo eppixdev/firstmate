@@ -28,6 +28,8 @@ case "$READ_ONLY" in 1|true|TRUE|yes|YES) READ_ONLY=1 ;; *) READ_ONLY=0 ;; esac
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-tangle-lib.sh
 . "$SCRIPT_DIR/fm-tangle-lib.sh"
+# shellcheck source=bin/fm-supervision-lib.sh
+. "$SCRIPT_DIR/fm-supervision-lib.sh"
 
 # Worktree-tangle alarm, checked FIRST and independent of in-flight tasks: the
 # firstmate PRIMARY checkout (FM_ROOT) must stay on its default branch. If a
@@ -56,48 +58,22 @@ if [ -n "$tangle_branch" ]; then
   } >&2
 fi
 
-# Portable mtime; see fm-watch.sh for why the `stat -f || stat -c` fallback breaks on Linux.
-if [ "$(uname)" = Darwin ]; then
-  stat_mtime() { stat -f %m "$1" 2>/dev/null; }
-else
-  stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
-fi
-
-# Only act with tasks in flight; count them so the banner can say how much is
-# riding on an absent watcher.
-in_flight=0
-for meta in "$STATE"/*.meta; do
-  [ -e "$meta" ] || continue
-  in_flight=$((in_flight + 1))
-done
+# Compute in-flight count and watcher-beacon freshness via the shared
+# grace-based predicate (bin/fm-supervision-lib.sh). Only act with tasks in
+# flight; count them so the banner can say how much is riding on an absent
+# watcher.
+fm_supervision_status "$STATE" "$GRACE"
+in_flight=$FM_SUP_IN_FLIGHT
+watcher_fresh=$FM_SUP_WATCHER_FRESH
+beacon_desc=$FM_SUP_BEACON_DESC
 [ "$in_flight" -eq 0 ] && exit 0
 
 [ -s "$FM_WAKE_QUEUE" ] && queue_pending=true
 
-# Resolve the watcher's liveness from its owned beacon: matching pid/path/home
-# metadata plus freshness within GRACE means the recorded watcher is alive and we
-# stay quiet about it.
-BEAT="$STATE/.last-watcher-beat"
-WATCH_LOCK="$STATE/.watch.lock"
-WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
-watcher_fresh=false
-beacon_desc=never
-if [ -e "$BEAT" ]; then
-  m=$(stat_mtime "$BEAT")
-  if [ -n "$m" ]; then
-    age=$(( $(date +%s) - m ))
-    beacon_desc="${age}s ago"
-    lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-    if [ "$age" -lt "$GRACE" ] && {
-      fm_pid_alive "$lock_pid" \
-        && fm_watcher_lock_matches_pid "$WATCH_LOCK" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
-        && fm_watcher_beat_matches_pid "$BEAT" "$lock_pid" "$WATCH_PATH" "$FM_HOME" \
-      || fm_watcher_records_match "$WATCH_LOCK" "$BEAT" "$WATCH_PATH" "$FM_HOME"
-    }; then
-      watcher_fresh=true
-    fi
-  else
-    beacon_desc=unknown
+if [ "$watcher_fresh" = true ]; then
+  WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
+  if ! fm_watcher_healthy "$STATE" "$WATCH_PATH" "$GRACE" "$FM_HOME"; then
+    watcher_fresh=false
   fi
 fi
 

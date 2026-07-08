@@ -72,7 +72,6 @@ keepalive_lock_matches_pid() {
   local pid=$1
   fm_watcher_lock_matches_pid "$KEEPALIVE_LOCK" "$pid" "$0" "$FM_HOME"
 }
-
 clear_stale_recorded_watcher_lock() {
   local lock_home lock_path lock_identity
   lock_home=$(cat "$WATCH_LOCK/fm-home" 2>/dev/null || true)
@@ -102,20 +101,9 @@ clear_stale_recorded_keepalive_lock() {
 # this script can never report a watcher that is not really there.
 HEALTHY_PID=
 healthy_watcher() {
-  local pid age
   HEALTHY_PID=
-  pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-  age=$(fm_path_age "$BEAT")
-  [ "$age" -lt "$GRACE" ] || return 1
-  if fm_pid_alive "$pid" \
-    && watch_lock_matches_pid "$pid" \
-    && fm_watcher_beat_matches_pid "$BEAT" "$pid" "$WATCH" "$FM_HOME"; then
-    HEALTHY_PID=$pid
-    return 0
-  fi
-  fm_watcher_records_match "$WATCH_LOCK" "$BEAT" "$WATCH" "$FM_HOME" || return 1
-  HEALTHY_PID=$pid
-  return 0
+  fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME" || return 1
+  HEALTHY_PID=$FM_WATCHER_HEALTHY_PID
 }
 
 legacy_healthy_watcher() {

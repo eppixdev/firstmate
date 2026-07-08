@@ -11,6 +11,7 @@
 #                 "TASKS_AXI: available", "TANGLE: <remediation>",
 #                 "SECONDMATE_SYNC: secondmate <id>: skipped: <reason>",
 #                 "NUDGE_SECONDMATES: <window-targets...>",
+#                 "SECONDMATE_LIVENESS: secondmate <id>: already-live|respawned|skipped: <reason>|respawn failed: <reason>",
 #                 "FMX: X mode on ..." or "FMX: X mode off ...".
 #          A NUDGE_SECONDMATES line lists the RUNNING secondmate windows whose
 #          worktree was fast-forwarded to firstmate's own current default-branch
@@ -23,6 +24,16 @@
 #          SECONDMATE_SYNC lines report actionable skipped local-HEAD syncs or
 #          config-inheritance failures for live secondmate homes; no-op/current
 #          and successful updates stay quiet.
+#          SECONDMATE_LIVENESS lines report every live secondmate's deeper
+#          agent-liveness verdict (bin/fm-backend.sh's fm_backend_agent_alive,
+#          distinct from the endpoint pane-presence check): already-live is a
+#          no-op, respawned means a confirmed-dead endpoint (a bare shell left
+#          behind by an exited secondmate agent) was killed and relaunched via
+#          bin/fm-spawn.sh --secondmate, and skipped means the probe could not
+#          confidently classify the endpoint (never acted on - a false-dead
+#          reading would spin up a duplicate agent). Session-start scope only;
+#          see AGENTS.md "Session start" and docs/tmux-backend.md /
+#          docs/herdr-backend.md "Agent liveness probe" for the empirical basis.
 #          A TANGLE line means the firstmate primary checkout (FM_ROOT) is stranded
 #          on a feature branch instead of its default branch - a crewmate's work
 #          landed in the primary instead of its own worktree; restore it per the line.
@@ -48,10 +59,11 @@
 #          recovered and STUCK clone drift, and prunes gone local branches; it is
 #          bounded by FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT, default 20s.
 #          Set FM_FLEET_PRUNE=0 to skip branch pruning during that refresh.
-#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the three MUTATING sweeps
-#          (secondmate_sync, x_mode_setup, fleet_sync) while still printing
-#          every read-only detect line above; the TANGLE line switches to
-#          advisory-only wording with no checkout command. Used by
+#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the four MUTATING sweeps
+#          (secondmate_sync, secondmate_liveness_sweep, x_mode_setup,
+#          fleet_sync) while still printing every read-only detect line
+#          above; the TANGLE line switches to advisory-only wording with no
+#          checkout command. Used by
 #          fm-session-start.sh's read-only path when another live session holds
 #          the fleet lock, so a second concurrent session never race-mutates
 #          secondmate homes, X-mode artifacts, project clones, or repair
@@ -178,6 +190,74 @@ secondmate_sync() {
     fi
   done < <(live_secondmate_meta_records "$STATE" "$FM_HOME/data/secondmates.md")
   [ -n "$FF_NUDGE_WINDOWS" ] && echo "NUDGE_SECONDMATES:$FF_NUDGE_WINDOWS"
+  return 0
+}
+
+secondmate_liveness_sweep() {
+  # Idempotent secondmate liveness guarantee - SESSION START ONLY. A
+  # secondmate agent that has exited leaves its backend endpoint alive as a
+  # bare shell; the session-start digest's "endpoint: alive" read
+  # (fm_backend_target_exists, pane-PRESENCE only) reports that shell as
+  # alive, so recovery never respawns it, and the watcher deliberately exempts
+  # secondmates from stale-pane detection (an idle secondmate pane is healthy
+  # by design). Evidence 2026-07-07: every secondmate in this fleet was found
+  # as a dead zsh shell, invisible to every existing check. This sweep closes
+  # the gap deterministically: for every LIVE secondmate meta (kind=secondmate
+  # with a recorded window=), run the deeper fm_backend_agent_alive probe
+  # (bin/fm-backend.sh) and act only on a CONFIDENT verdict:
+  #   alive   - no-op.
+  #   dead    - kill the stale endpoint first (best-effort; the tmux adapter
+  #             refuses to create a same-named window over a live one) then
+  #             respawn via the existing recovery path (bin/fm-spawn.sh <id>
+  #             --secondmate; secondmate-provisioning).
+  #   unknown - NEVER acted on. A false-dead reading would spin up a DUPLICATE
+  #             agent (two supervisors in one home); a false-alive reading
+  #             merely leaves today's bug unfixed for one more sweep. The
+  #             worse direction is guarded by never treating anything less
+  #             than a confident dead reading as license to respawn.
+  # A meta with no recorded window= at all is left to the existing "meta with
+  # no window" recovery path (AGENTS.md section 5 / secondmate-provisioning);
+  # there is no endpoint here for this probe to read.
+  # Naturally scoped to the primary: a secondmate's own state/ never holds
+  # kind=secondmate metas (secondmates never spawn secondmates), so this
+  # sweep is a silent no-op there, exactly like secondmate_sync above.
+  # Scope: session start (reboot/restart) only. A secondmate dying
+  # MID-SESSION is a harder follow-on needing a periodic liveness beacon -
+  # explicitly out of scope here.
+  [ -d "$STATE" ] || return 0
+  local meta id window harness backend target verdict out
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] || continue
+    grep -q '^kind=secondmate$' "$meta" 2>/dev/null || continue
+    id=$(basename "$meta" .meta)
+    window=$(fm_meta_get "$meta" window)
+    [ -n "$window" ] || continue
+    harness=$(fm_meta_get "$meta" harness)
+    backend=$(fm_backend_of_meta "$meta")
+    target=$(fm_backend_target_of_meta "$meta")
+    [ -n "$target" ] || target="$window"
+    verdict=$(fm_backend_agent_alive "$backend" "$target" 2>/dev/null) || verdict="unknown"
+    case "$harness" in
+      claude|codex|opencode|pi|grok) ;;
+      *) [ "$verdict" = dead ] && verdict=unknown ;;
+    esac
+    case "$verdict" in
+      alive)
+        echo "SECONDMATE_LIVENESS: secondmate $id: already-live"
+        ;;
+      dead)
+        fm_backend_kill "$backend" "$target" 2>/dev/null || true
+        if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+          echo "SECONDMATE_LIVENESS: secondmate $id: respawned"
+        else
+          echo "SECONDMATE_LIVENESS: secondmate $id: respawn failed: $(first_line "$out")"
+        fi
+        ;;
+      *)
+        echo "SECONDMATE_LIVENESS: secondmate $id: skipped: liveness probe inconclusive (backend=$backend)"
+        ;;
+    esac
+  done
   return 0
 }
 
@@ -347,8 +427,13 @@ crew_dispatch_validate() {
       elif $h == "opencode" then false
       else true
       end;
+    def use_profiles($u):
+      if ($u | type) == "array" then $u
+      elif ($u | type) == "object" then [$u]
+      else []
+      end;
     def bad_efforts:
-      ([(.rules // [])[]? | select((.use? | type) == "object") | {h: .use.harness, e: .use.effort}]
+      ([(.rules // [])[]? | use_profiles(.use?)[]? | {h: .harness, e: .effort}]
         + (if (.default? | type) == "object" then [{h: .default.harness, e: .default.effort}] else [] end))
       | map(select(.e != null))
       | map(select((.h | type) == "string" and verified(.h)))
@@ -359,11 +444,17 @@ crew_dispatch_validate() {
     elif has("rules") and (.rules | type) != "array" then "rules must be an array"
     elif [(.rules // [])[]? | select(type != "object")] | length > 0 then "each rule must be an object"
     elif [(.rules // [])[]? | select((.when? | type) != "string" or (.when | length) == 0)] | length > 0 then "each rule needs non-empty when"
-    elif [(.rules // [])[]? | select((.use? | type) != "object" or (.use.harness? | type) != "string" or (.use.harness | length) == 0)] | length > 0 then "each rule needs use.harness"
+    elif [(.rules // [])[]? | select((.use? | type) != "object" and (.use? | type) != "array")] | length > 0 then "each rule needs use"
+    elif [(.rules // [])[]? | select((.use? | type) == "array" and (.use | length) == 0)] | length > 0 then "each rule needs at least one use profile"
+    elif [(.rules // [])[]? | use_profiles(.use?)[]? | select(type != "object")] | length > 0 then "each use profile must be an object"
+    elif [(.rules // [])[]? | use_profiles(.use?)[]? | select((.harness? | type) != "string" or (.harness | length) == 0)] | length > 0 then "each use profile needs harness"
+    elif [(.rules // [])[]? | select(has("select") and ((.select? | type) != "string" or (.select | length) == 0))] | length > 0 then "select must be a non-empty string"
+    elif [(.rules // [])[]? | .select? // empty | select(. != "quota-balanced")] | length > 0 then
+      "unknown select: " + ([ (.rules // [])[]? | .select? // empty | select(. != "quota-balanced") ] | unique | join(", "))
     elif has("default") and (.default | type) != "object" then "default must be an object"
     elif has("default") and ((.default.harness? | type) != "string" or (.default.harness | length) == 0) then "default needs harness when present"
     else
-      ([(.rules // [])[]?.use.harness, .default?.harness?]
+      ([(.rules // [])[]? | use_profiles(.use?)[]?.harness] + [.default?.harness?]
         | map(select(. != null))
         | map(select(. as $h | verified($h) | not))
         | unique) as $bad_harnesses
@@ -384,8 +475,14 @@ crew_dispatch_validate() {
          elif ($p.effort? != null) then "/default"
          else "" end)
       + (if ($p.effort? != null) then "/" + ($p.effort | tostring) else "" end);
+    def use_label($r):
+      if ($r.use | type) == "array" then
+        ((if ($r.select? != null) then ($r.select | tostring) else "first" end)
+          + "[" + ([$r.use[] | profile(.)] | join(", ")) + "]")
+      else profile($r.use)
+      end;
     (["CREW_DISPATCH: active config/crew-dispatch.json"]
-      + [(.rules // [])[]? | "  rule: " + (.when | tostring) + " -> " + profile(.use)]
+      + [(.rules // [])[]? | "  rule: " + (.when | tostring) + " -> " + use_label(.)]
       + (if (.default? | type) == "object" then ["  default: " + profile(.default)] else [] end))
     | .[]
   ' "$file"
@@ -463,6 +560,7 @@ if ! fm_backlog_backend_manual "$CONFIG"; then
 fi
 if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
   secondmate_sync
+  secondmate_liveness_sweep
   x_mode_setup
   fleet_sync
 fi
