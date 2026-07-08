@@ -731,12 +731,11 @@ test_arm_surfaces_delayed_signal_wake_with_nonzero_exit() {
 }
 
 test_keepalive_rearms_after_actionable_wake() {
-  local dir state fakebin armout drain_out status_file armpid i before after
+  local dir state fakebin armout status_file armpid i before after
   dir=$(make_case arm-keepalive-rearm)
   state="$dir/state"
   fakebin="$dir/fakebin"
   armout="$dir/arm.out"
-  drain_out="$dir/drain.out"
   status_file="$state/task.status"
 
   PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
@@ -768,13 +767,58 @@ test_keepalive_rearms_after_actionable_wake() {
   [ -n "$after" ] || fail "second keepalive watcher did not record a pid"
   [ "$after" != "$before" ] || fail "keepalive did not replace the fired watcher"
   kill -0 "$after" 2>/dev/null || fail "second keepalive watcher is not alive"
-
-  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after keepalive wake failed"
-  grep "$(printf '\tsignal\t')" "$drain_out" | grep -F "$status_file" >/dev/null || fail "keepalive wake was not queued"
+  [ ! -s "$state/.wake-queue" ] || fail "keepalive left the actionable wake queued instead of consuming it"
 
   kill "$armpid" "$after" 2>/dev/null || true
   wait "$armpid" 2>/dev/null || true
-  pass "keepalive arm starts a fresh watcher cycle after an actionable wake"
+  pass "keepalive arm starts a fresh watcher cycle after an actionable wake and does not leave it queued"
+}
+
+test_keepalive_auto_drains_and_surfaces_next_action() {
+  local dir state fakebin armout status_file armpid i
+  dir=$(make_case arm-keepalive-auto-supervise)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  status_file="$state/task.status"
+
+  printf 'window=test:fm-task\nkind=ship\n' > "$state/task.meta"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_FAKE_CREW_STATE='state: parked · source: run-step · parked at review' \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_WATCH_ARM_KEEPALIVE_IDLE_SLEEP=1 \
+    "$WATCH_ARM" --keepalive > "$armout" &
+  armpid=$!
+
+  i=0
+  while [ "$i" -lt 80 ]; do
+    grep -qF 'watcher: started pid=' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout" || fail "keepalive arm did not start the watcher"
+
+  printf 'needs-decision: pick A or B\n' > "$status_file"
+
+  i=0
+  while [ "$i" -lt 100 ]; do
+    grep -qF "signal: $status_file" "$armout" 2>/dev/null || {
+      sleep 0.1
+      i=$((i + 1))
+      continue
+    }
+    [ ! -s "$state/.wake-queue" ] && grep -qF 'NEXT ACTION: task - state: parked' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  grep -F "signal: $status_file" "$armout" >/dev/null || fail "keepalive child did not print the wake reason"
+  [ ! -s "$state/.wake-queue" ] || fail "keepalive did not auto-drain the actionable wake while the captain stayed quiet"
+  grep -F 'NEXT ACTION: task - state: parked' "$armout" >/dev/null || fail "keepalive did not surface the next actionable parked gate"
+
+  kill "$armpid" "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" 2>/dev/null || true
+  wait "$armpid" 2>/dev/null || true
+  pass "keepalive auto-drains actionable wakes and surfaces the next gate"
 }
 
 test_keepalive_dedupes_concurrent_wrappers() {
@@ -997,6 +1041,7 @@ test_arm_hup_cleans_child_and_temp_output
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_surfaces_delayed_signal_wake_with_nonzero_exit
 test_keepalive_rearms_after_actionable_wake
+test_keepalive_auto_drains_and_surfaces_next_action
 test_keepalive_dedupes_concurrent_wrappers
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_accepts_equivalent_home_aliases

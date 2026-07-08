@@ -37,8 +37,9 @@
 # back to firstmate automatically. In those environments the default one-shot
 # arm can fire correctly, queue a wake, and then leave supervision down until a
 # human sends the next prompt. Keepalive mode preserves the existing wake queue
-# and stdout reason line, but starts a fresh watcher cycle right away so
-# firstmate is not blind between prompts.
+# and stdout reason line, starts a fresh watcher cycle right away so firstmate
+# is not blind between prompts, then reuses the ordinary turn-sync path to
+# consume that queued wake and surface the next actionable gate.
 #
 # --restart: stop ONLY this FM_HOME's watcher (the pid recorded in THIS home's
 # state/.watch.lock) and start a fresh one. It resolves and signals exactly that
@@ -52,6 +53,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 
 WATCH="$SCRIPT_DIR/fm-watch.sh"
+TURN_SYNC_BIN="${FM_WATCH_TURN_SYNC_BIN:-$SCRIPT_DIR/fm-turn-sync.sh}"
 WATCH_LOCK="$STATE/.watch.lock"
 KEEPALIVE_LOCK="$STATE/.watch.keepalive.lock"
 BEAT="$STATE/.last-watcher-beat"
@@ -160,6 +162,12 @@ exit_with_wake() {
   exit "$WAKE_EXIT_STATUS"
 }
 
+run_keepalive_turn_sync() {
+  [ -e "$STATE/.afk" ] && return 0
+  [ -x "$TURN_SYNC_BIN" ] || return 0
+  "$TURN_SYNC_BIN" || true
+}
+
 mode=arm
 keepalive=0
 for arg in "$@"; do
@@ -202,15 +210,18 @@ if [ "$keepalive" -eq 1 ] && [ -z "${FM_WATCH_ARM_KEEPALIVE_CHILD:-}" ]; then
   trap 'cleanup_keepalive_child; exit 143' TERM INT
 
   first=1
+  prelaunched=0
   while :; do
-    child_mode=--arm
-    if [ "$first" -eq 1 ] && [ "$mode" = restart ]; then
-      child_mode=--restart
+    if [ "$prelaunched" -eq 0 ]; then
+      child_mode=--arm
+      if [ "$first" -eq 1 ] && [ "$mode" = restart ]; then
+        child_mode=--restart
+      fi
+      FM_WATCH_ARM_KEEPALIVE_CHILD=1 "$0" "$child_mode" &
+      keepalive_child=$!
     fi
     first=0
-
-    FM_WATCH_ARM_KEEPALIVE_CHILD=1 "$0" "$child_mode" &
-    keepalive_child=$!
+    prelaunched=0
     wait "$keepalive_child"
     rc=$?
     keepalive_child=
@@ -218,8 +229,12 @@ if [ "$keepalive" -eq 1 ] && [ -z "${FM_WATCH_ARM_KEEPALIVE_CHILD:-}" ]; then
     case "$rc" in
       "$WAKE_EXIT_STATUS")
         # The child already printed the wake reason and queued the durable wake.
-        # Keep the next cycle live even if this harness never surfaces that
-        # background completion back to firstmate.
+        # Keep the next cycle live before draining through turn-sync so
+        # supervision does not go blind while the queued wake is consumed.
+        FM_WATCH_ARM_KEEPALIVE_CHILD=1 "$0" --arm &
+        keepalive_child=$!
+        prelaunched=1
+        run_keepalive_turn_sync
         ;;
       0)
         # Another healthy watcher may own the singleton. Poll lightly until this
