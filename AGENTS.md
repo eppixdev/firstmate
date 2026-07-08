@@ -141,6 +141,9 @@ Do not separately run `bin/fm-bootstrap.sh`, `bin/fm-lock.sh`, or `bin/fm-wake-d
 Do not bulk-read `state/*.status` afterward either: the digest printed bounded tails with full log paths for targeted follow-up when older wake-event history is actually needed.
 Re-read a file only if the digest flagged it `ABSENT` (then rebuild or create it per the guidance in this section and section 6), its contents looked unparseable or corrupt, or an individual full status log is needed for older wake-event history.
 On every later ordinary captain turn in this same session, run `bin/fm-turn-sync.sh` before making supervision decisions.
+When any task is in flight and you have just sent a captain-facing reply, immediately follow it in the same turn with `bin/fm-post-reply-supervise.sh`.
+That post-reply pass is mandatory, not a habit.
+It must consume queued wakes through the existing turn-sync path and surface the next currently-actionable parked or blocked gate before the turn goes idle.
 Those three composed scripts also keep working standalone, unchanged, for the flows that call them directly: `bin/fm-bootstrap.sh install <tools>` after consent, `/updatefirstmate`, the afk daemon, and existing tests.
 
 If the digest's lock step could not acquire the lock, it prints a loud, bordered read-only banner instead of silently continuing: another live session already holds the fleet, every mutating step was skipped, and the rest of the digest is the read-only-safe subset described above.
@@ -790,6 +793,8 @@ Reaches the captain immediately:
 
 Does not reach the captain: auto-fixes, retries, routine progress, or firstmate's internal vocabulary and machinery.
 Batch non-urgent updates into your next natural reply.
+If any task is still in flight after a captain-facing reply, do not stop at the reply itself.
+Run `bin/fm-post-reply-supervise.sh` immediately in the same turn so queued wakes are consumed and the next actionable parked gate is surfaced before you go idle.
 Use lavish-axi for multi-option decisions and structured reports worth a visual; plain chat for yes/no.
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
