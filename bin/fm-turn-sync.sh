@@ -3,8 +3,10 @@
 # started session.
 # Drain queued wakes when they exist; otherwise run the same watcher
 # liveness/tangle guard used elsewhere.
-# Then surface the next currently-actionable parked/blocked gate so the very
-# next supervision move is obvious before the turn ends or a reply is sent.
+# Then surface the next currently-actionable follow-up so the very next
+# supervision move is obvious before the turn ends or a reply is sent.
+# Terminal crew states such as done stay surfaced here until teardown, so a
+# drained completion wake cannot be silently forgotten on later captain turns.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

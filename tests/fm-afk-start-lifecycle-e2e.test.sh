@@ -143,6 +143,8 @@ reset_runtime_state() {
     kill "$(cat "$STATE_DIR/.supervise-daemon.pid")" 2>/dev/null || true
     sleep 0.2
   fi
+  "$REAL_TMUX" -L "$SOCKET" send-keys -N 200 -t "$SUPERVISOR_PANE" BSpace 2>/dev/null || true
+  sleep 0.2
   rm -f "$STATE_DIR"/*.status \
         "$STATE_DIR"/.subsuper-* \
         "$STATE_DIR"/.supervise-daemon.pid \
@@ -273,6 +275,44 @@ test_afk_start_rejects_stale_live_pidfile() {
   pass "fm-afk-start rejects stale live pidfiles"
 }
 
+test_afk_start_rejects_pending_supervisor_composer() {
+  reset_runtime_state
+  "$REAL_TMUX" -L "$SOCKET" send-keys -t "$SUPERVISOR_PANE" -l "human draft"
+  sleep 0.5
+
+  PATH="$TMUX_SHIM_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="$SUPERVISOR_PANE" \
+    "$START" >"$STATE_DIR/pending.out" 2>"$STATE_DIR/pending.err" \
+    && fail "fm-afk-start succeeded with a pending supervisor composer"
+
+  [ ! -e "$STATE_DIR/.afk" ] \
+    || fail "fm-afk-start left afk active after rejecting a pending composer"
+  grep -F "pending input" "$STATE_DIR/pending.err" >/dev/null \
+    || fail "fm-afk-start did not explain the pending-composer rejection"
+  "$REAL_TMUX" -L "$SOCKET" send-keys -N 20 -t "$SUPERVISOR_PANE" BSpace
+  sleep 0.2
+  pass "fm-afk-start fails closed when the supervisor composer is already dirty"
+}
+
+test_afk_start_rejects_stale_wedge_marker() {
+  reset_runtime_state
+  printf 'wedged away-mode escalation\n' > "$STATE_DIR/.subsuper-inject-wedged"
+  printf 'blocked: stale buffer\n' > "$STATE_DIR/.subsuper-escalations"
+
+  PATH="$TMUX_SHIM_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="$SUPERVISOR_PANE" \
+    "$START" >"$STATE_DIR/wedged.out" 2>"$STATE_DIR/wedged.err" \
+    && fail "fm-afk-start succeeded with a stale wedge marker"
+
+  [ ! -e "$STATE_DIR/.afk" ] \
+    || fail "fm-afk-start left afk active after rejecting a stale wedge marker"
+  grep -F "still wedged" "$STATE_DIR/wedged.err" >/dev/null \
+    || fail "fm-afk-start did not explain the stale wedge rejection"
+  pass "fm-afk-start rejects stale wedged away-mode state"
+}
+
 test_direct_nohup_can_leave_afk_without_daemon() {
   reset_runtime_state
   date '+%s' > "$STATE_DIR/.afk"
@@ -356,6 +396,8 @@ test_afk_start_run_shell_failure_rolls_back_afk
 test_afk_skill_uses_start_helper_as_afk_entry
 test_afk_start_accepts_live_legacy_daemon_lock
 test_afk_start_rejects_stale_live_pidfile
+test_afk_start_rejects_pending_supervisor_composer
+test_afk_start_rejects_stale_wedge_marker
 test_direct_nohup_can_leave_afk_without_daemon
 test_afk_start_survives_launcher_teardown_and_escalates_done
 

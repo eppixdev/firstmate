@@ -725,13 +725,63 @@ test_normal_flush_clears_stale_wedge_marker() {
   pass "normal flush clears a stale wedge marker"
 }
 
+test_urgent_blocked_flushes_immediately() {
+  local dir state fakebin sent
+  dir=$(make_bordered_case urgent-blocked-flush)
+  state="$dir/state"; fakebin="$dir/fakebin"
+  sent="$dir/sent.log"; : > "$sent"
+  printf 'blocked: docker socket denied\n' > "$state/urgent-b1.status"
+  afk_enter "$state"
+  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+    FM_ESCALATE_BATCH_SECS=99999 FM_INJECT_CONFIRM_SLEEP=0.05 \
+    handle_wake "signal: $state/urgent-b1.status" "$state"
+  grep -F 'blocked: docker socket denied' "$sent" >/dev/null \
+    || fail "urgent blocked status did not flush immediately"
+  [ ! -s "$state/.subsuper-escalations" ] || fail "urgent blocked flush left the buffer behind"
+  [ ! -e "$state/.subsuper-escalations.urgent" ] || fail "urgent marker survived a successful flush"
+  pass "blocked escalations bypass the normal batch delay"
+}
+
+test_urgent_needs_decision_pending_composer_alarms_immediately() {
+  local dir state fakebin sent
+  dir=$(make_bordered_case urgent-needs-decision-pending)
+  state="$dir/state"; fakebin="$dir/fakebin"
+  sent="$dir/sent.log"; : > "$sent"
+  printf '│ > human draft │\n' > "$dir/composer"
+  printf 'needs-decision: pick A\n' > "$state/urgent-n1.status"
+  afk_enter "$state"
+  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+    FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=60 FM_INJECT_CONFIRM_SLEEP=0.05 \
+    handle_wake "signal: $state/urgent-n1.status" "$state"
+  [ ! -s "$sent" ] || fail "urgent needs-decision typed into a pending composer"
+  [ -s "$state/.subsuper-escalations" ] || fail "urgent needs-decision dropped the buffer on immediate failure"
+  [ -s "$state/.subsuper-inject-wedged" ] || fail "urgent needs-decision did not raise a wedge marker immediately"
+  pass "urgent needs-decision escalations alarm immediately when the composer is dirty"
+}
+
+test_startup_reconcile_flushes_buffer_immediately() {
+  local dir state fakebin sent
+  dir=$(make_bordered_case startup-reconcile-flush)
+  state="$dir/state"; fakebin="$dir/fakebin"
+  sent="$dir/sent.log"; : > "$sent"
+  escalate_add "$state" "blocked: stale buffered escalation"
+  afk_enter "$state"
+  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+    FM_INJECT_CONFIRM_SLEEP=0.05 startup_reconcile_escalations "$state" \
+    || fail "startup reconcile did not flush a stale buffered escalation"
+  grep -F 'blocked: stale buffered escalation' "$sent" >/dev/null \
+    || fail "startup reconcile digest missing the stale buffered escalation"
+  [ ! -s "$state/.subsuper-escalations" ] || fail "startup reconcile did not clear the buffer"
+  pass "startup reconciliation flushes stale buffered escalations immediately"
+}
+
 test_below_max_defer_does_nothing() {
   local dir state fakebin sent capture
   dir=$(make_supercase below-maxdefer)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
   capture="$dir/pane.txt"; printf 'stuck junk line\n' > "$capture"
-  escalate_add "$state" "needs-decision: pick A"
+  escalate_add "$state" "done: PR https://x/y/pull/3"
   date +%s > "$state/.subsuper-escalations.since"   # just now
   afk_enter "$state"
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
@@ -1009,6 +1059,9 @@ test_max_defer_empty_swallow_types_once_and_alarms
 test_max_defer_flushes_empty_idle_pane
 test_max_defer_pending_composer_alarms_without_typing
 test_normal_flush_clears_stale_wedge_marker
+test_urgent_blocked_flushes_immediately
+test_urgent_needs_decision_pending_composer_alarms_immediately
+test_startup_reconcile_flushes_buffer_immediately
 test_below_max_defer_does_nothing
 test_max_defer_afk_inactive_does_not_flush_or_alarm
 test_fm_send_exits_nonzero_on_confirmed_swallow
