@@ -654,6 +654,24 @@ test_content_fallback_allows_equal_local_tree_without_fetch_or_merge_tree() {
   pass "content fallback accepts an equal local default-branch tree without fetch or merge-tree"
 }
 
+test_content_fallback_allows_when_local_default_is_ahead_of_origin() {
+  local case_dir rc wt_head
+  case_dir=$(make_case content-local-main-ahead)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  wt_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  git -C "$case_dir/project" update-ref refs/heads/main "$wt_head"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "content-local-main-ahead: teardown should succeed when local main contains the work even if origin/main is behind"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "content-local-main-ahead: teardown printed a REFUSED line"
+  pass "content fallback accepts landed work on local main when origin/main lags"
+}
+
 test_dirty_worktree_refuses() {
   local case_dir rc pr_head
   case_dir=$(make_case dirty-wt)
@@ -733,5 +751,6 @@ test_pr_check_records_remote_head_when_local_lags
 test_content_in_default_fallback_allows
 test_content_fallback_refreshes_stale_origin_ref
 test_content_fallback_allows_equal_local_tree_without_fetch_or_merge_tree
+test_content_fallback_allows_when_local_default_is_ahead_of_origin
 test_dirty_worktree_refuses
 test_gh_error_and_content_absent_refuses

@@ -243,29 +243,38 @@ pr_is_merged() {
 # "added". Returns non-zero when inconclusive (no default ref, or a merge conflict),
 # so the caller refuses rather than guesses.
 content_in_default() {
-  local name ref default_tree head_tree merged_tree
+  local name ref default_tree head_tree merged_tree refs
   name=$(default_branch) || return 1
-  if git -C "$WT" rev-parse --quiet --verify "refs/remotes/origin/$name" >/dev/null 2>&1; then
-    ref="refs/remotes/origin/$name"
-  elif git -C "$WT" rev-parse --quiet --verify "refs/heads/$name" >/dev/null 2>&1; then
-    ref="refs/heads/$name"
-  else
-    return 1
-  fi
-  default_tree=$(git -C "$WT" rev-parse --quiet --verify "$ref^{tree}" 2>/dev/null) || return 1
-  [ -n "$default_tree" ] || return 1
   head_tree=$(git -C "$WT" rev-parse --quiet --verify "HEAD^{tree}" 2>/dev/null) || return 1
   [ -n "$head_tree" ] || return 1
-  [ "$head_tree" = "$default_tree" ] && return 0
-  if [ "$ref" = "refs/remotes/origin/$name" ] && git -C "$WT" remote get-url origin >/dev/null 2>&1; then
-    git -C "$WT" fetch --quiet origin "+refs/heads/$name:refs/remotes/origin/$name" >/dev/null 2>&1 || return 1
-    default_tree=$(git -C "$WT" rev-parse --quiet --verify "$ref^{tree}" 2>/dev/null) || return 1
-    [ -n "$default_tree" ] || return 1
-    [ "$head_tree" = "$default_tree" ] && return 0
+  refs=
+  if git -C "$WT" rev-parse --quiet --verify "refs/remotes/origin/$name" >/dev/null 2>&1; then
+    refs="${refs}refs/remotes/origin/$name
+"
   fi
-  merged_tree=$(git -C "$WT" merge-tree --write-tree "$ref" HEAD 2>/dev/null) || return 1
-  merged_tree=$(printf '%s\n' "$merged_tree" | head -1)
-  [ "$merged_tree" = "$default_tree" ]
+  if git -C "$WT" rev-parse --quiet --verify "refs/heads/$name" >/dev/null 2>&1; then
+    refs="${refs}refs/heads/$name
+"
+  fi
+  [ -n "$refs" ] || return 1
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    default_tree=$(git -C "$WT" rev-parse --quiet --verify "$ref^{tree}" 2>/dev/null) || continue
+    [ -n "$default_tree" ] || continue
+    [ "$head_tree" = "$default_tree" ] && return 0
+    if [ "$ref" = "refs/remotes/origin/$name" ] && git -C "$WT" remote get-url origin >/dev/null 2>&1; then
+      git -C "$WT" fetch --quiet origin "+refs/heads/$name:refs/remotes/origin/$name" >/dev/null 2>&1 || continue
+      default_tree=$(git -C "$WT" rev-parse --quiet --verify "$ref^{tree}" 2>/dev/null) || continue
+      [ -n "$default_tree" ] || continue
+      [ "$head_tree" = "$default_tree" ] && return 0
+    fi
+    merged_tree=$(git -C "$WT" merge-tree --write-tree "$ref" HEAD 2>/dev/null) || continue
+    merged_tree=$(printf '%s\n' "$merged_tree" | head -1)
+    [ "$merged_tree" = "$default_tree" ] && return 0
+  done <<EOF
+$refs
+EOF
+  return 1
 }
 
 # Has the worktree's committed work actually LANDED, though its commits are not
