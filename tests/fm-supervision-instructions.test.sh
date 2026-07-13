@@ -58,8 +58,12 @@ test_repair_lines() {
   assert_contains "$out" "source '$home/config/x-mode.env' first" "x-mode repair line did not source the effective cadence config"
   assert_contains "$out" "bin/fm-watch-checkpoint.sh --seconds 7" "x-mode codex repair line lost the checkpoint helper"
 
-  out=$(FM_HOME="$home" "$RENDER" --harness opencode --read-only 1 --repair-line)
+  out=$(FM_HOME="$home" "$RENDER" --harness opencode --read-only 1 --read-only-reason contended --repair-line)
   assert_contains "$out" "session holding the fleet lock" "read-only repair line missing"
+
+  out=$(FM_HOME="$home" "$RENDER" --harness opencode --read-only 1 --read-only-reason unavailable --repair-line)
+  assert_contains "$out" "fleet-lock identity is available" "identity-unavailable repair line was not ownership-neutral"
+  assert_not_contains "$out" "session holding the fleet lock" "identity-unavailable repair line claimed a competing session"
 
   out=$(FM_HOME="$home" "$RENDER" --harness pi --repair-line)
   assert_contains "$out" "Pi tool fm_watch_arm_pi" "pi repair line does not direct the model to the extension-owned tool"

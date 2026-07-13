@@ -173,7 +173,7 @@ fi
 # --- 2. bootstrap --------------------------------------------------------
 subsection "BOOTSTRAP"
 if [ "$READ_ONLY" -eq 1 ]; then
-  BOOT_OUT=$(FM_BOOTSTRAP_DETECT_ONLY=1 "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(FM_BOOTSTRAP_DETECT_ONLY=1 FM_READ_ONLY_REASON="$READ_ONLY_REASON" "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1)
 else
   BOOT_OUT=$("$SCRIPT_DIR/fm-bootstrap.sh" 2>&1)
 fi
@@ -187,8 +187,8 @@ fi
 # Drained records are this turn's first work queue (AGENTS.md section 8); the
 # drain also runs fm-guard.sh internally on the locked path, so the
 # tangle/watcher-liveness banners land right here too, ahead of the bulk
-# digest below. The read-only path never touches the queue (another session
-# may be actively draining it) but still runs fm-guard.sh directly with
+# digest below. The read-only path never touches the queue because ownership
+# is contended or unavailable, but still runs fm-guard.sh directly with
 # non-mutating advisory text, so the same alarms surface without repair
 # commands.
 subsection "WAKE QUEUE"
@@ -200,7 +200,7 @@ if [ "$READ_ONLY" -eq 1 ]; then
   else
     printf 'skipped (read-only session) - %s record(s) remain queued because lock ownership could not be established.\n' "$QLEN"
   fi
-  GUARD_OUT=$(FM_GUARD_READ_ONLY=1 "$SCRIPT_DIR/fm-guard.sh" 2>&1)
+  GUARD_OUT=$(FM_GUARD_READ_ONLY=1 FM_READ_ONLY_REASON="$READ_ONLY_REASON" "$SCRIPT_DIR/fm-guard.sh" 2>&1)
   [ -n "$GUARD_OUT" ] && printf '%s\n' "$GUARD_OUT"
 else
   DRAIN_OUT=$("$SCRIPT_DIR/fm-wake-drain.sh" 2>&1)
@@ -233,6 +233,7 @@ fi
 "$SCRIPT_DIR/fm-supervision-instructions.sh" \
   --harness "$PRIMARY_HARNESS" \
   --read-only "$READ_ONLY" \
+  --read-only-reason "${READ_ONLY_REASON:-unavailable}" \
   --afk "$AFK_PRESENT" \
   --x-mode "$X_MODE_PRESENT"
 

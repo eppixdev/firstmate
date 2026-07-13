@@ -83,9 +83,12 @@ test_guard_banner() {
   assert_contains "$out" "WORKTREE TANGLE" "guard did not alarm on a feature branch in the primary"
   assert_contains "$out" "fm/tangle-aa1" "guard banner did not name the offending branch"
   assert_contains "$out" "checkout main" "guard banner did not print the restore remediation"
-  out=$(FM_GUARD_READ_ONLY=1 run_guard "$repo")
+  out=$(FM_GUARD_READ_ONLY=1 FM_READ_ONLY_REASON=unavailable run_guard "$repo")
   assert_contains "$out" "WORKTREE TANGLE" "read-only guard did not keep the tangle alarm"
-  assert_contains "$out" "read-only session must leave restore work" "read-only guard did not explain restore ownership"
+  assert_contains "$out" "until fleet-lock identity is available" "identity-unavailable guard did not use ownership-neutral wording"
+  assert_not_contains "$out" "session holding the fleet lock" "identity-unavailable guard claimed a competing session"
+  out=$(FM_GUARD_READ_ONLY=1 FM_READ_ONLY_REASON=contended run_guard "$repo")
+  assert_contains "$out" "session holding the fleet lock" "contended guard did not preserve lock-holder ownership"
   assert_not_contains "$out" "checkout main" "read-only guard printed a state-changing restore command"
   pass "fm-guard: bordered tangle banner fires only for a feature branch and suppresses repair commands in read-only mode"
 }
@@ -112,9 +115,12 @@ test_bootstrap_line() {
   out=$(run_bootstrap "$repo" | grep '^TANGLE:' || true)
   assert_contains "$out" "fm/tangle-bb2" "bootstrap did not report the tangled branch"
   assert_contains "$out" "checkout main" "bootstrap TANGLE line lacked the restore remediation"
-  out=$(FM_ROOT_OVERRIDE="$repo" FM_HOME="$repo" FM_BOOTSTRAP_DETECT_ONLY=1 "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null | grep '^TANGLE:' || true)
+  out=$(FM_ROOT_OVERRIDE="$repo" FM_HOME="$repo" FM_BOOTSTRAP_DETECT_ONLY=1 FM_READ_ONLY_REASON=unavailable "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null | grep '^TANGLE:' || true)
   assert_contains "$out" "fm/tangle-bb2" "detect-only bootstrap did not report the tangled branch"
-  assert_contains "$out" "read-only session must leave restore work" "detect-only bootstrap did not explain restore ownership"
+  assert_contains "$out" "later session after fleet-lock identity is available" "identity-unavailable bootstrap did not use ownership-neutral wording"
+  assert_not_contains "$out" "session holding the fleet lock" "identity-unavailable bootstrap claimed a competing session"
+  out=$(FM_ROOT_OVERRIDE="$repo" FM_HOME="$repo" FM_BOOTSTRAP_DETECT_ONLY=1 FM_READ_ONLY_REASON=contended "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null | grep '^TANGLE:' || true)
+  assert_contains "$out" "session holding the fleet lock" "contended bootstrap did not preserve lock-holder ownership"
   assert_not_contains "$out" "checkout main" "detect-only bootstrap printed a state-changing restore command"
   pass "fm-bootstrap: TANGLE problem line fires only for a feature branch and suppresses repair commands in detect-only mode"
 }

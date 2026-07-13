@@ -65,13 +65,15 @@
 #          refresh relays any completed fm-fleet-sync.sh output before the
 #          aggregate timeout skip line with timeout and elapsed seconds.
 #          Set FM_FLEET_PRUNE=0 to skip branch pruning during that refresh.
+#          The gh-axi authentication probe is bounded by
+#          FM_GITHUB_AUTH_PROBE_TIMEOUT seconds (default 5).
 #          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the four MUTATING sweeps
 #          (secondmate_sync, secondmate_liveness_sweep, x_mode_setup,
 #          fleet_sync) while still printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
 #          checkout command. Used by
-#          fm-session-start.sh's read-only path when another live session holds
-#          the fleet lock, so a second concurrent session never race-mutates
+#          fm-session-start.sh's read-only path when fleet-lock ownership is
+#          contended or unavailable, so a read-only session never race-mutates
 #          secondmate homes, X-mode artifacts, project clones, or repair
 #          instructions. Unset/0 (the default) runs every sweep exactly as
 #          before - this flag is purely additive.
@@ -111,20 +113,47 @@ fleet_sync_origin_backed_project_count() {
   echo "$count"
 }
 
-# GitHub operations are required to use gh-axi when it is available.
-# A repository read proves that gh-axi's brokered authentication is working.
-# Codex's network-disabled sandbox cannot perform that read until the wrapper
-# is granted host network access, so installed gh-axi is the capability proof
-# there. Keep raw gh as a fallback for terminal harnesses without brokered auth.
+github_probe_bounded() {
+  local timeout_seconds
+  timeout_seconds=${FM_GITHUB_AUTH_PROBE_TIMEOUT:-5}
+  case "$timeout_seconds" in
+    ''|*[!0-9]*|0) timeout_seconds=5 ;;
+  esac
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$timeout_seconds" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$timeout_seconds" "$@"
+  else
+    return 124
+  fi
+}
+
 github_auth_available() {
-  (
-    cd "$FM_ROOT" || exit 1
-    gh-axi repo view >/dev/null 2>&1
-  ) && return 0
   if [ "${CODEX_SANDBOX_NETWORK_DISABLED:-0}" = 1 ] && command -v gh-axi >/dev/null 2>&1; then
     return 0
   fi
+  command -v gh-axi >/dev/null 2>&1 && (
+    cd "$FM_ROOT" || exit 1
+    github_probe_bounded gh-axi repo view >/dev/null 2>&1
+  ) && return 0
   gh auth status >/dev/null 2>&1
+}
+
+read_only_reason() {
+  case "${FM_READ_ONLY_REASON:-unavailable}" in
+    contended) printf '%s\n' contended ;;
+    *) printf '%s\n' unavailable ;;
+  esac
+}
+
+read_only_owner() {
+  if [ "$(read_only_reason)" = contended ]; then
+    printf '%s\n' 'the session holding the fleet lock'
+  else
+    printf '%s\n' 'a later session after fleet-lock identity is available'
+  fi
 }
 
 fleet_sync_bootstrap_timeout() {
@@ -634,7 +663,7 @@ tangle_branch=$(fm_primary_tangle_branch "$FM_ROOT" 2>/dev/null || true)
 if [ -n "$tangle_branch" ]; then
   tangle_default=$(fm_default_branch "$FM_ROOT" 2>/dev/null || echo main)
   if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" = 1 ]; then
-    echo "TANGLE: primary checkout on feature branch '$tangle_branch' (expected '$tangle_default'); the work is safe on that ref - read-only session must leave restore work to the session holding the fleet lock"
+    echo "TANGLE: primary checkout on feature branch '$tangle_branch' (expected '$tangle_default'); the work is safe on that ref - read-only session must leave restore work to $(read_only_owner)"
   else
     echo "TANGLE: primary checkout on feature branch '$tangle_branch' (expected '$tangle_default'); the work is safe on that ref - restore the primary with: git -C $FM_ROOT checkout $tangle_default, then re-validate the branch in a proper worktree"
   fi

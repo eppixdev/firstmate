@@ -12,6 +12,7 @@ DOC_DIR="$REPO_ROOT/docs/supervision-protocols"
 
 HARNESS=
 READ_ONLY=0
+READ_ONLY_REASON=unavailable
 AFK=0
 X_MODE=0
 REPAIR_LINE=0
@@ -19,7 +20,7 @@ QUEUE_PENDING=0
 
 usage() {
   cat <<'EOF'
-Usage: fm-supervision-instructions.sh [--harness <name>] [--read-only 0|1] [--afk 0|1] [--x-mode 0|1] [--repair-line] [--queue-pending 0|1]
+Usage: fm-supervision-instructions.sh [--harness <name>] [--read-only 0|1] [--read-only-reason contended|unavailable] [--afk 0|1] [--x-mode 0|1] [--repair-line] [--queue-pending 0|1]
 
 Print the current primary harness's supervision operating instructions.
 With --repair-line, print one concise repair instruction for guard and hook messages.
@@ -43,6 +44,14 @@ while [ "$#" -gt 0 ]; do
     --read-only)
       [ "$#" -gt 1 ] || { echo "error: --read-only requires 0 or 1" >&2; exit 2; }
       READ_ONLY=$(bool_value "$2")
+      shift 2
+      ;;
+    --read-only-reason)
+      [ "$#" -gt 1 ] || { echo "error: --read-only-reason requires contended or unavailable" >&2; exit 2; }
+      case "$2" in
+        contended|unavailable) READ_ONLY_REASON=$2 ;;
+        *) echo "error: --read-only-reason requires contended or unavailable" >&2; exit 2 ;;
+      esac
       shift 2
       ;;
     --afk)
@@ -116,7 +125,11 @@ render_snippet() {
 
 repair_line() {
   if [ "$READ_ONLY" -eq 1 ]; then
-    printf '%s\n' 'Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.'
+    if [ "$READ_ONLY_REASON" = contended ]; then
+      printf '%s\n' 'Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.'
+    else
+      printf '%s\n' 'Watcher repair must wait until fleet-lock identity is available; do not drain, arm, or repair from this read-only session.'
+    fi
     return 0
   fi
   if [ "$AFK" -eq 1 ]; then
@@ -165,7 +178,11 @@ printf 'SUPERVISION OPERATING INSTRUCTIONS - primary harness: %s\n' "$HARNESS"
 printf '%s\n' "$RULE"
 printf 'Current state:\n'
 if [ "$READ_ONLY" -eq 1 ]; then
-  printf '%s\n' '- Lock: read-only; do not drain, arm, spawn, steer, merge, or repair fleet state here.'
+  if [ "$READ_ONLY_REASON" = contended ]; then
+    printf '%s\n' '- Lock: read-only because another live session holds it; do not drain, arm, spawn, steer, merge, or repair fleet state here.'
+  else
+    printf '%s\n' '- Lock: read-only because fleet-lock identity is unavailable; do not drain, arm, spawn, steer, merge, or repair fleet state here.'
+  fi
 else
   printf '%s\n' '- Lock: held by this session; this session owns normal supervision unless away mode says otherwise.'
 fi

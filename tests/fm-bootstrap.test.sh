@@ -41,6 +41,7 @@ make_fake_toolchain() {
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
+  [ "${FM_FAKE_GH_AXI_HANG:-0}" != 1 ] || exec sleep 300
   exit "${FM_FAKE_GH_AXI_STATUS:-0}"
 fi
 exit 0
@@ -82,7 +83,7 @@ SH
 }
 
 test_github_auth_detection() {
-  local case_dir fakebin out
+  local case_dir fakebin out started elapsed
   case_dir="$TMP_ROOT/github-auth"
   mkdir -p "$case_dir/home"
   fakebin=$(make_fake_toolchain "$case_dir")
@@ -102,7 +103,15 @@ test_github_auth_detection() {
     CODEX_SANDBOX_NETWORK_DISABLED=0 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
   assert_contains "$out" "NEEDS_GH_AUTH" "missing gh-axi and raw gh authentication was not reported"
 
-  pass "bootstrap accepts brokered gh-axi access and reports only when every GitHub auth path fails"
+  started=$SECONDS
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_HANG=1 FM_FAKE_GH_STATUS=0 \
+    FM_GITHUB_AUTH_PROBE_TIMEOUT=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  elapsed=$((SECONDS - started))
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "timed-out gh-axi probe did not fall back to working raw gh auth"
+  [ "$elapsed" -lt 5 ] || fail "hung gh-axi probe exceeded its bound (elapsed ${elapsed}s)"
+
+  pass "bootstrap bounds brokered gh-axi access and reports only when every GitHub auth path fails"
 }
 
 add_quota_axi() {

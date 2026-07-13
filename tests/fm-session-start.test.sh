@@ -362,6 +362,9 @@ $rec
 EOF
   make_fake_toolchain "$fakebin"
   make_fake_ps_without_harness "$fakebin"
+  printf 'window=fm-sess:w1\nkind=ship\n' > "$home/state/task-a.meta"
+  append_wake "$home/state" signal task-a "done: queued while identity is unavailable" || fail "seed wake failed"
+  git -C "$root" checkout -q -B fm/identity-unavailable-tangle
 
   status=0
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
@@ -370,8 +373,12 @@ EOF
   assert_contains "$out" "FLEET LOCK IDENTITY IS UNAVAILABLE" "identity failure did not receive its distinct read-only banner"
   assert_contains "$out" "cannot locate harness process in ancestry" "identity failure did not preserve fm-lock.sh's diagnostic"
   assert_contains "$out" "No competing" "identity failure did not state that contention was unproven"
+  assert_contains "$out" "fleet-lock ownership is unavailable" "identity failure did not propagate to queued-wake guard wording"
+  assert_contains "$out" "fleet-lock identity is unavailable" "identity failure did not propagate to supervision wording"
+  assert_contains "$out" "later session after fleet-lock identity is available" "identity failure did not propagate to bootstrap tangle wording"
   assert_not_contains "$out" "ANOTHER LIVE FIRSTMATE SESSION" "identity failure was falsely reported as lock contention"
   assert_not_contains "$out" "session holding the lock owns mutable follow-up" "identity failure assigned work to a nonexistent lock holder"
+  assert_not_contains "$out" "session holding the fleet lock" "identity failure helper output claimed a competing lock holder"
 
   pass "a missing harness identity stays safe without falsely claiming another live session"
 }
