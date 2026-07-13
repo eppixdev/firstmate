@@ -120,9 +120,9 @@ github_probe_bounded() {
     ''|*[!0-9]*|0) timeout_seconds=5 ;;
   esac
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$timeout_seconds" "$@"
+    timeout -k 1 "$timeout_seconds" "$@"
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$timeout_seconds" "$@"
+    gtimeout -k 1 "$timeout_seconds" "$@"
   elif command -v perl >/dev/null 2>&1; then
     perl -e '
       my $t = shift;

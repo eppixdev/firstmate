@@ -41,6 +41,11 @@ make_fake_toolchain() {
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
+  if [ "${FM_FAKE_GH_AXI_RESIST_TERM:-0}" = 1 ]; then
+    [ -z "${FM_FAKE_GH_AXI_PID_FILE:-}" ] || printf '%s\n' "$$" > "$FM_FAKE_GH_AXI_PID_FILE"
+    trap '' TERM
+    while :; do sleep 1; done
+  fi
   if [ "${FM_FAKE_GH_AXI_HANG:-0}" = 1 ]; then
     [ -z "${FM_FAKE_GH_AXI_PID_FILE:-}" ] || printf '%s\n' "$$" > "$FM_FAKE_GH_AXI_PID_FILE"
     exec sleep 300
@@ -87,6 +92,7 @@ SH
 }
 
 run_without_timeout_commands() (
+  # shellcheck disable=SC2329
   command() {
     if [ "${1:-}" = -v ] && { [ "${2:-}" = timeout ] || [ "${2:-}" = gtimeout ]; }; then
       return 1
@@ -147,6 +153,18 @@ test_github_auth_detection() {
   [ "$elapsed" -lt 5 ] || fail "Perl fallback exceeded its bound (elapsed ${elapsed}s)"
   probe_pid=$(cat "$pid_file")
   ! kill -0 "$probe_pid" 2>/dev/null || fail "Perl fallback left timed-out gh-axi process $probe_pid running"
+
+  pid_file="$case_dir/gh-axi-term-resistant.pid"
+  started=$SECONDS
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_RESIST_TERM=1 FM_FAKE_GH_AXI_PID_FILE="$pid_file" \
+    FM_FAKE_GH_STATUS=0 FM_GITHUB_AUTH_PROBE_TIMEOUT=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    "$ROOT/bin/fm-bootstrap.sh")
+  elapsed=$((SECONDS - started))
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "TERM-resistant gh-axi probe did not fall back to working raw gh auth"
+  [ "$elapsed" -lt 5 ] || fail "TERM-resistant gh-axi probe exceeded its hard bound (elapsed ${elapsed}s)"
+  probe_pid=$(cat "$pid_file")
+  ! kill -0 "$probe_pid" 2>/dev/null || fail "bounded probe left TERM-resistant gh-axi process $probe_pid running"
 
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
     FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_SIGNAL=1 FM_FAKE_GH_STATUS=0 \
