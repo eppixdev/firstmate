@@ -41,7 +41,11 @@ make_fake_toolchain() {
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
-  [ "${FM_FAKE_GH_AXI_HANG:-0}" != 1 ] || exec sleep 300
+  if [ "${FM_FAKE_GH_AXI_HANG:-0}" = 1 ]; then
+    [ -z "${FM_FAKE_GH_AXI_PID_FILE:-}" ] || printf '%s\n' "$$" > "$FM_FAKE_GH_AXI_PID_FILE"
+    exec sleep 300
+  fi
+  [ "${FM_FAKE_GH_AXI_SIGNAL:-0}" != 1 ] || kill -TERM "$$"
   exit "${FM_FAKE_GH_AXI_STATUS:-0}"
 fi
 exit 0
@@ -82,8 +86,19 @@ SH
   printf '%s\n' "$fakebin"
 }
 
+run_without_timeout_commands() (
+  command() {
+    if [ "${1:-}" = -v ] && { [ "${2:-}" = timeout ] || [ "${2:-}" = gtimeout ]; }; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+  export -f command
+  "$@"
+)
+
 test_github_auth_detection() {
-  local case_dir fakebin out started elapsed
+  local case_dir fakebin out started elapsed probe_pid pid_file
   case_dir="$TMP_ROOT/github-auth"
   mkdir -p "$case_dir/home"
   fakebin=$(make_fake_toolchain "$case_dir")
@@ -110,6 +125,33 @@ test_github_auth_detection() {
   elapsed=$((SECONDS - started))
   assert_not_contains "$out" "NEEDS_GH_AUTH" "timed-out gh-axi probe did not fall back to working raw gh auth"
   [ "$elapsed" -lt 5 ] || fail "hung gh-axi probe exceeded its bound (elapsed ${elapsed}s)"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_STATUS=0 FM_FAKE_GH_STATUS=1 \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 run_without_timeout_commands "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "Perl fallback rejected a successful gh-axi probe"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_SIGNAL=1 FM_FAKE_GH_STATUS=1 \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 run_without_timeout_commands "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NEEDS_GH_AUTH" "Perl fallback accepted a signaled gh-axi probe"
+
+  pid_file="$case_dir/gh-axi.pid"
+  started=$SECONDS
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_HANG=1 FM_FAKE_GH_AXI_PID_FILE="$pid_file" \
+    FM_FAKE_GH_STATUS=1 FM_GITHUB_AUTH_PROBE_TIMEOUT=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    run_without_timeout_commands "$ROOT/bin/fm-bootstrap.sh")
+  elapsed=$((SECONDS - started))
+  assert_contains "$out" "NEEDS_GH_AUTH" "Perl fallback accepted a timed-out gh-axi probe"
+  [ "$elapsed" -lt 5 ] || fail "Perl fallback exceeded its bound (elapsed ${elapsed}s)"
+  probe_pid=$(cat "$pid_file")
+  ! kill -0 "$probe_pid" 2>/dev/null || fail "Perl fallback left timed-out gh-axi process $probe_pid running"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_SIGNAL=1 FM_FAKE_GH_STATUS=0 \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 run_without_timeout_commands "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "Perl fallback did not use working raw gh auth after a signaled probe"
 
   pass "bootstrap bounds brokered gh-axi access and reports only when every GitHub auth path fails"
 }

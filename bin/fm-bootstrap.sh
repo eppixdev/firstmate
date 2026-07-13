@@ -124,7 +124,42 @@ github_probe_bounded() {
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout "$timeout_seconds" "$@"
   elif command -v perl >/dev/null 2>&1; then
-    perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$timeout_seconds" "$@"
+    perl -e '
+      my $t = shift;
+      pipe(my $ready_read, my $ready_write) or die "pipe failed";
+      my $pid = fork;
+      die "fork failed" unless defined $pid;
+      if (!$pid) {
+        close $ready_read;
+        setpgrp(0, 0) or exit 125;
+        syswrite $ready_write, "1";
+        close $ready_write;
+        exec @ARGV;
+        exit 127;
+      }
+      close $ready_write;
+      my $group_ready = 0;
+      local $SIG{ALRM} = sub {
+        my $target = $group_ready ? -$pid : $pid;
+        kill "TERM", $target;
+        select undef, undef, undef, 0.2;
+        kill "KILL", $target;
+        while (1) {
+          my $waited = waitpid($pid, 0);
+          last if $waited == $pid;
+          next if $waited == -1 && $!{EINTR};
+          last;
+        }
+        exit 124;
+      };
+      alarm $t;
+      $group_ready = sysread($ready_read, my $ready, 1) ? 1 : 0;
+      close $ready_read;
+      waitpid($pid, 0);
+      alarm 0;
+      my $status = $?;
+      exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
+    ' "$timeout_seconds" "$@"
   else
     return 124
   fi
