@@ -3,7 +3,8 @@
 # Writes the harness (agent) process PID found by walking the shell's ancestry,
 # which lives as long as the firstmate session - unlike the transient subshell
 # PID of any one tool call, which is dead moments after it is written.
-# Usage: fm-lock.sh           acquire; exit 1 if another live session holds it
+# Usage: fm-lock.sh           acquire; exit 1 if another live session holds it,
+#                            exit 2 if this process cannot identify its harness
 #        fm-lock.sh status    print holder and liveness; always exits 0
 set -u
 
@@ -49,7 +50,7 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
-me=$(harness_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
+me=$(harness_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 2; }
 if [ -f "$LOCK" ]; then
   old=$(cat "$LOCK")
   if [ "$old" != "$me" ] && holder_alive "$old"; then

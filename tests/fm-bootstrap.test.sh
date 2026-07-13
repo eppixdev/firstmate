@@ -32,16 +32,24 @@ export FM_BACKEND_CMUX_BUNDLE_BIN="$TMP_ROOT/no-bundled-cmux"
 unset TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_SESSION HERDR_SOCKET_PATH \
   CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_SOCKET_PATH CMUX_TAB_ID CMUX_PANEL_ID 2>/dev/null || true
 
-# A fake toolchain where every required tool is present and gh is authenticated.
+# A fake toolchain where every required tool is present and GitHub is authenticated.
 # treehouse's `get --help` advertises --lease only when FM_FAKE_TREEHOUSE_LEASE_HELP=1.
 make_fake_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
-  fm_fake_exit0 "$fakebin" tmux node gh-axi chrome-devtools-axi lavish-axi
+  fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi lavish-axi
+  cat > "$fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
+  exit "${FM_FAKE_GH_AXI_STATUS:-0}"
+fi
+exit 0
+SH
+  chmod +x "$fakebin/gh-axi"
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
-  exit 0
+  exit "${FM_FAKE_GH_STATUS:-0}"
 fi
 exit 0
 SH
@@ -71,6 +79,30 @@ SH
   add_tasks_axi "$fakebin" "0.1.1"
   add_quota_axi "$fakebin"
   printf '%s\n' "$fakebin"
+}
+
+test_github_auth_detection() {
+  local case_dir fakebin out
+  case_dir="$TMP_ROOT/github-auth"
+  mkdir -p "$case_dir/home"
+  fakebin=$(make_fake_toolchain "$case_dir")
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_STATUS=0 FM_FAKE_GH_STATUS=1 \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "working gh-axi brokered auth was rejected because raw gh auth failed"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_STATUS=1 FM_FAKE_GH_STATUS=1 \
+    CODEX_SANDBOX_NETWORK_DISABLED=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "network-disabled Codex sandbox rejected its installed brokered gh-axi path"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GH_AXI_STATUS=1 FM_FAKE_GH_STATUS=1 \
+    CODEX_SANDBOX_NETWORK_DISABLED=0 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NEEDS_GH_AUTH" "missing gh-axi and raw gh authentication was not reported"
+
+  pass "bootstrap accepts brokered gh-axi access and reports only when every GitHub auth path fails"
 }
 
 add_quota_axi() {
@@ -696,6 +728,7 @@ ROWS
 }
 
 test_bootstrap_reporting
+test_github_auth_detection
 test_no_mistakes_min_version
 test_git_is_required_with_supported_install_instruction
 test_orca_backend_gates_orca_tool_only_when_selected

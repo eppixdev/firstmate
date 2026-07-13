@@ -66,9 +66,9 @@
 #
 # Usage: fm-session-start.sh
 #   Prints the full ordered digest to stdout and always exits 0: this is a
-#   reporting command, not a gate. A lock refusal is reported as a loud
-#   banner inline, never a silent failure or a non-zero exit that would make
-#   an agent skip the rest of the digest.
+#   reporting command, not a gate. Lock contention and lock-identity failures
+#   are reported as distinct loud banners inline, never as a silent failure or
+#   a non-zero exit that would make an agent skip the rest of the digest.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -147,12 +147,19 @@ LOCK_OUT=$("$SCRIPT_DIR/fm-lock.sh" 2>&1)
 LOCK_RC=$?
 printf '%s\n' "$LOCK_OUT"
 READ_ONLY=0
+READ_ONLY_REASON=
 if [ "$LOCK_RC" -ne 0 ]; then
   READ_ONLY=1
+  READ_ONLY_REASON=unavailable
+  [ "$LOCK_RC" -eq 1 ] && READ_ONLY_REASON=contended
   BAR='●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   {
     printf '%s\n' "$BAR"
-    printf '●  READ-ONLY SESSION - ANOTHER LIVE FIRSTMATE SESSION HOLDS THE FLEET LOCK\n'
+    if [ "$READ_ONLY_REASON" = contended ]; then
+      printf '●  READ-ONLY SESSION - ANOTHER LIVE FIRSTMATE SESSION HOLDS THE FLEET LOCK\n'
+    else
+      printf '●  READ-ONLY SESSION - FLEET LOCK IDENTITY IS UNAVAILABLE\n'
+    fi
     printf '●  %s\n' "$LOCK_OUT"
     printf '●  Skipping every mutating step: secondmate sync, X-mode artifacts,\n'
     printf '●  fleet sync, and wake-queue drain. Detect-only bootstrap diagnostics and\n'
@@ -188,7 +195,11 @@ subsection "WAKE QUEUE"
 if [ "$READ_ONLY" -eq 1 ]; then
   QLEN=0
   [ -s "$STATE/.wake-queue" ] && QLEN=$(grep -c . "$STATE/.wake-queue" 2>/dev/null || printf '0')
-  printf 'skipped (read-only session) - %s record(s) remain queued for the session holding the lock.\n' "$QLEN"
+  if [ "$READ_ONLY_REASON" = contended ]; then
+    printf 'skipped (read-only session) - %s record(s) remain queued for the session holding the lock.\n' "$QLEN"
+  else
+    printf 'skipped (read-only session) - %s record(s) remain queued because lock ownership could not be established.\n' "$QLEN"
+  fi
   GUARD_OUT=$(FM_GUARD_READ_ONLY=1 "$SCRIPT_DIR/fm-guard.sh" 2>&1)
   [ -n "$GUARD_OUT" ] && printf '%s\n' "$GUARD_OUT"
 else
@@ -289,12 +300,21 @@ fi
 # --- 6. closing reminder -----------------------------------------------
 section "NEXT STEP"
 if [ "$READ_ONLY" -eq 1 ]; then
-  cat <<'EOF'
+  if [ "$READ_ONLY_REASON" = contended ]; then
+    cat <<'EOF'
 This session did not acquire the fleet lock. Stay read-only: do not arm,
 drain, spawn, steer, merge, or repair fleet state from here. The session
 holding the lock owns mutable follow-up.
 
 EOF
+  else
+    cat <<'EOF'
+This session could not establish a fleet-lock identity. Stay read-only: do not
+arm, drain, spawn, steer, merge, or repair fleet state from here. No competing
+session was detected; the active harness is not visible in process ancestry.
+
+EOF
+  fi
 elif [ "$AFK_PRESENT" -eq 1 ]; then
   cat <<'EOF'
 Away mode is active. Follow the supervision operating instructions block above:

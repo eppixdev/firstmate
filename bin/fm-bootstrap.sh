@@ -111,6 +111,22 @@ fleet_sync_origin_backed_project_count() {
   echo "$count"
 }
 
+# GitHub operations are required to use gh-axi when it is available.
+# A repository read proves that gh-axi's brokered authentication is working.
+# Codex's network-disabled sandbox cannot perform that read until the wrapper
+# is granted host network access, so installed gh-axi is the capability proof
+# there. Keep raw gh as a fallback for terminal harnesses without brokered auth.
+github_auth_available() {
+  (
+    cd "$FM_ROOT" || exit 1
+    gh-axi repo view >/dev/null 2>&1
+  ) && return 0
+  if [ "${CODEX_SANDBOX_NETWORK_DISABLED:-0}" = 1 ] && command -v gh-axi >/dev/null 2>&1; then
+    return 0
+  fi
+  gh auth status >/dev/null 2>&1
+}
+
 fleet_sync_bootstrap_timeout() {
   local count timeout
   if [ -n "${FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT:-}" ]; then
@@ -610,7 +626,7 @@ fi
 if command -v tasks-axi >/dev/null 2>&1 && ! fm_tasks_axi_compatible; then
   echo "MISSING: tasks-axi (install: $(install_cmd tasks-axi))"
 fi
-gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
+github_auth_available || echo "NEEDS_GH_AUTH"
 # Worktree-tangle check: the firstmate primary checkout (FM_ROOT) must sit on its
 # default branch, not a feature branch (see fm-tangle-lib.sh). Scoped to the
 # primary only; detached-HEAD worktrees and secondmate homes never trip it.

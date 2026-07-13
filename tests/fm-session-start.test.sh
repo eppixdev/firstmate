@@ -90,6 +90,21 @@ make_fake_ps_claude() {
   make_fake_ps_harness "$fakebin" claude
 }
 
+make_fake_ps_without_harness() {
+  local fakebin=$1
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "$*" in
+  *"comm="*) printf '/bin/zsh\n'; exit 0 ;;
+  *"args="*) printf 'zsh\n'; exit 0 ;;
+  *"ppid="*) printf '1\n'; exit 0 ;;
+esac
+exit 1
+SH
+  chmod +x "$fakebin/ps"
+}
+
 make_fake_ps_harness() {
   local fakebin=$1 harness=$2
   cat > "$fakebin/ps" <<'SH'
@@ -337,6 +352,28 @@ EOF
   assert_contains "$out" "NEXT STEP" "closing reminder missing on the read-only path"
 
   pass "a lock refusal prints a loud read-only banner, skips every mutating step, and still completes the digest"
+}
+
+test_lock_identity_unavailable_read_only_path() {
+  local rec root home fakebin out status
+  rec=$(new_world lock-identity-unavailable)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_without_harness "$fakebin"
+
+  status=0
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+
+  expect_code 0 "$status" "fm-session-start.sh must complete when lock identity is unavailable"
+  assert_contains "$out" "FLEET LOCK IDENTITY IS UNAVAILABLE" "identity failure did not receive its distinct read-only banner"
+  assert_contains "$out" "cannot locate harness process in ancestry" "identity failure did not preserve fm-lock.sh's diagnostic"
+  assert_contains "$out" "No competing" "identity failure did not state that contention was unproven"
+  assert_not_contains "$out" "ANOTHER LIVE FIRSTMATE SESSION" "identity failure was falsely reported as lock contention"
+  assert_not_contains "$out" "session holding the lock owns mutable follow-up" "identity failure assigned work to a nonexistent lock holder"
+
+  pass "a missing harness identity stays safe without falsely claiming another live session"
 }
 
 # --- output ordering ----------------------------------------------------------
@@ -742,6 +779,7 @@ EOF
 
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
+test_lock_identity_unavailable_read_only_path
 test_output_ordering_diagnostics_lead
 test_herdr_backend_diagnostics_follow_real_session_start
 test_status_tail_bounding
