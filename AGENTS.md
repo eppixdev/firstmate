@@ -148,7 +148,7 @@ Those three composed scripts also keep working standalone, unchanged, for the fl
 
 If the digest's lock step could not acquire the lock, it prints a loud, bordered read-only banner instead of silently continuing, skips every mutating step, and runs only the read-only-safe subset described above.
 Exit 1 from `bin/fm-lock.sh` confirms contention by another live session, so tell the captain that session is managing the work.
-Exit 2 means the active harness identity is unavailable from process ancestry, so report that ownership could not be established without claiming a competing session exists.
+Exit 2 means the active harness identity is unavailable from process ancestry, so report that lock contention could not be determined or confirmed.
 In either case, operate read-only until resolved - do not spawn, steer, merge, or otherwise mutate fleet state from this session.
 
 Bootstrap is detect, then consent, then install.

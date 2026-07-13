@@ -311,8 +311,8 @@ EOF
   else
     cat <<'EOF'
 This session could not establish a fleet-lock identity. Stay read-only: do not
-arm, drain, spawn, steer, merge, or repair fleet state from here. No competing
-session was detected; the active harness is not visible in process ancestry.
+arm, drain, spawn, steer, merge, or repair fleet state from here. Lock contention
+could not be determined or confirmed because the active harness identity is unavailable.
 
 EOF
   fi
