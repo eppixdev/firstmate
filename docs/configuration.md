@@ -209,7 +209,8 @@ On session start the first mate detects what its required toolchain is missing o
 It installs automatically supported tools only after you say go; manual-only tools remain for you to install from the printed instructions.
 Required tools come in two parts: a universal toolchain every home needs regardless of backend, and a per-backend delta that follows the runtime backend actually resolved for this home.
 The universal toolchain is node, git, gh, no-mistakes v1.31.2 or newer, gh-axi, chrome-devtools-axi, lavish-axi, compatible tasks-axi per "Backlog backend" above, and quota-axi.
-GitHub auth is satisfied by working gh-axi brokered access, by installed gh-axi inside Codex's network-disabled sandbox, or by raw gh via `gh auth login`.
+GitHub auth is satisfied by working gh-axi brokered access or by raw gh via `gh auth login`.
+Inside Codex's network-disabled sandbox, installed gh-axi is treated as sufficient because the brokered path cannot be probed through the sandbox network.
 This section is the single owner of that universal toolchain list; backend guides' prerequisites point here and add only their backend-specific tools.
 In that list, no-mistakes runs the validation pipeline, gh-axi, chrome-devtools-axi, and lavish-axi cover GitHub, browser, and rich-review operations, and tasks-axi plus quota-axi back backlog mutations and quota-balanced dispatch.
 The per-backend delta is required only for the backend resolved from `FM_BACKEND`, then `config/backend`, then runtime auto-detection, then default `tmux`, so a home is never told to install a tool an inactive backend or feature would need.
@@ -225,6 +226,7 @@ An absent or incompatible `tasks-axi` reports `MISSING: tasks-axi (install: npm 
 An absent `quota-axi` reports `MISSING: quota-axi (install: npm install -g quota-axi)`; `bin/fm-dispatch-select.sh` still degrades to the first profile at runtime when quota data is unavailable.
 Bootstrap also reports a `TANGLE:` line when `FM_ROOT` is on a named non-default branch; follow the printed checkout remediation rather than treating it as an installable tool problem.
 In a read-only session that did not get the fleet lock, the same line is advisory and omits the checkout command.
+Its wording names the lock holder only for confirmed contention and remains ownership-neutral when process ancestry makes the active harness identity unavailable.
 The locked session-start bootstrap step also runs a best-effort project clone refresh through `fm-fleet-sync.sh`.
 It emits `FLEET_SYNC:` for skipped refreshes that may matter, recovered self-heals, and `STUCK:` alarms.
 Normal completed runs keep local-only and no-origin skips silent.
@@ -336,6 +338,7 @@ FM_BACKEND_CMUX_COMPOSER_LINES=20  # cmux-only: tail lines scanned to locate the
 FM_BACKEND_CMUX_IDLE_RE='^Type a message\.\.\.$'  # cmux-only: empty-composer placeholder regex after border/prompt stripping
 CMUX_SOCKET_PASSWORD=   # cmux-only: socket password fallback when config/cmux-socket-password is absent (docs/cmux-backend.md)
 FM_SESSION_START_STATUS_TAIL=5   # state/*.status lines printed per task in the session-start digest
+CODEX_SANDBOX_NETWORK_DISABLED=0 # Codex runtime marker: 1 treats installed brokered gh-axi as sufficient without a network probe
 FM_GITHUB_AUTH_PROBE_TIMEOUT=5   # seconds allowed for bootstrap's brokered gh-axi authentication probe
 FM_BOOTSTRAP_DETECT_ONLY=0   # internal/read-only session-start mode: skip bootstrap's mutating sweeps and print advisory TANGLE wording
 FM_GUARD_READ_ONLY=0    # internal/read-only guard mode: keep alarms but suppress drain, supervision repair, and checkout repair commands
