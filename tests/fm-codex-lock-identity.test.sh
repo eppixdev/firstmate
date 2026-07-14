@@ -109,3 +109,13 @@ expected_resumed="codex-thread:$RESUMED_THREAD:$PROCESS_B"
 [ "$(cat "$HOME_DIR/state/.lock")" = "$expected_resumed" ] \
   || fail "resumed Codex thread did not persist its current runtime process token"
 pass "a resumed Codex thread replaces its stale runtime process lock"
+
+legacy_holder=424242
+printf '%s\n' "$legacy_holder" > "$HOME_DIR/state/.lock"
+status=0
+PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" CODEX_THREAD_ID="$CURRENT_THREAD" \
+  FM_CODEX_STATE_DB="$STATE_DB" FM_CODEX_LOGS_DB="$LOGS_DB" "$LOCK" >/dev/null 2>&1 || status=$?
+expect_code 2 "$status" "managed Codex must not classify an invisible legacy PID as dead"
+[ "$(cat "$HOME_DIR/state/.lock")" = "$legacy_holder" ] \
+  || fail "managed Codex replaced an unprovable legacy PID lock"
+pass "managed Codex preserves an invisible legacy PID lock as indeterminate"

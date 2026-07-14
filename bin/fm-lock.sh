@@ -60,7 +60,7 @@ session_identity() {
 # Prints live, dead, or unknown for either the legacy harness PID or the
 # managed-Codex token format.
 holder_state() {
-  local holder=$1 state
+  local holder=$1 observer=${2:-} state
   case "$holder" in
     ''|*[!0-9]*)
       case "$holder" in
@@ -73,7 +73,13 @@ holder_state() {
       esac
       ;;
     *)
-      if holder_alive "$holder"; then printf 'live\n'; else printf 'dead\n'; fi
+      if holder_alive "$holder"; then
+        printf 'live\n'
+      elif [ "${observer#codex-thread:}" != "$observer" ]; then
+        printf 'unknown\n'
+      else
+        printf 'dead\n'
+      fi
       ;;
   esac
 }
@@ -89,7 +95,8 @@ identity_label() {
 if [ "${1:-}" = "status" ]; then
   if [ ! -f "$LOCK" ]; then echo "lock: free"; exit 0; fi
   old=$(cat "$LOCK")
-  state=$(holder_state "$old")
+  observer=$(session_identity 2>/dev/null) || observer=
+  state=$(holder_state "$old" "$observer")
   label=$(identity_label "$old")
   case "$state" in
     live) echo "lock: held by live $label" ;;
@@ -103,7 +110,7 @@ me=$(session_identity) || { echo "error: cannot establish a live session identit
 if [ -f "$LOCK" ]; then
   old=$(cat "$LOCK")
   if [ "$old" != "$me" ]; then
-    state=$(holder_state "$old")
+    state=$(holder_state "$old" "$me")
     if [ "$state" = live ]; then
       echo "error: another live firstmate session holds the lock ($(identity_label "$old")); operate read-only until resolved" >&2
       exit 1
