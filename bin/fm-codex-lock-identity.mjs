@@ -78,14 +78,17 @@ function classify(token, state, logs) {
   if (!match || !THREAD_RE.test(match[1]) || !PROCESS_RE.test(match[2])) return "unknown";
   const [, holderThread, holderProcess] = match;
   const currentThread = process.env.CODEX_THREAD_ID || "";
+  const currentProcess = THREAD_RE.test(currentThread) ? processFor(logs, currentThread) : null;
 
-  if (THREAD_RE.test(currentThread) && holderThread === currentThread) return "live";
+  if (holderThread === currentThread) {
+    if (!currentProcess) return "unknown";
+    return holderProcess === currentProcess ? "live" : "dead";
+  }
   if (threadArchived(state, holderThread)) return "dead";
 
   const holderLog = latestLog(logs, holderThread);
   if (holderLog?.process_uuid === holderProcess && agentLoopExited(holderLog)) return "dead";
 
-  const currentProcess = THREAD_RE.test(currentThread) ? processFor(logs, currentThread) : null;
   if (currentProcess && holderLog?.process_uuid === currentProcess) return "live";
   if (currentProcess && holderProcess === currentProcess) return "live";
 

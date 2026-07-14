@@ -459,6 +459,11 @@ no_mistakes_compatible() {
   [ "$patch" -ge "$NO_MISTAKES_MIN_PATCH" ]
 }
 
+node_sqlite_compatible() {
+  node -e 'const { DatabaseSync } = require("node:sqlite"); process.exit(typeof DatabaseSync === "function" ? 0 : 1)' \
+    >/dev/null 2>&1
+}
+
 # Write CONTENT to DEST only when it differs, so re-running bootstrap does not
 # churn mtimes or duplicate generated files (idempotence).
 write_if_changed() {
@@ -677,6 +682,9 @@ done
 for t in $COMMON_TOOLS; do
   command -v "$t" >/dev/null || missing_tool_diagnostic "$t"
 done
+if command -v node >/dev/null 2>&1 && ! node_sqlite_compatible; then
+  missing_tool_diagnostic node
+fi
 # The treehouse lease-support upgrade check is only relevant when the resolved
 # backend actually requires treehouse (every backend except orca, which owns its
 # own worktrees); an orca home must not be told to upgrade a provider it never uses.

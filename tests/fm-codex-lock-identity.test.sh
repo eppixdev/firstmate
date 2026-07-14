@@ -18,6 +18,7 @@ PEER_THREAD=019f5e42-c59b-74b0-bea6-729499fbd397
 EXITED_THREAD=019f53eb-dd2a-7090-a519-2f254aa3d892
 ARCHIVED_THREAD=019f53eb-ddfe-75f1-94ac-cfe863b62c5f
 UNKNOWN_THREAD=019f5962-8192-7aa2-bd2b-027847998880
+RESUMED_THREAD=019f5962-8192-7aa2-bd2b-027847998881
 PROCESS_A=pid:56297:aa837eb9-c72c-4607-a8f8-912fb4e58add
 PROCESS_B=pid:86213:340d61e5-c357-4276-afb6-8e679aabb284
 
@@ -43,6 +44,7 @@ putThread.run("019f5e42-c59b-74b0-bea6-729499fbd397", 0);
 putThread.run("019f53eb-dd2a-7090-a519-2f254aa3d892", 0);
 putThread.run("019f53eb-ddfe-75f1-94ac-cfe863b62c5f", 1);
 putThread.run("019f5962-8192-7aa2-bd2b-027847998880", 0);
+putThread.run("019f5962-8192-7aa2-bd2b-027847998881", 0);
 
 const logs = new DatabaseSync(process.env.FM_CODEX_LOGS_DB);
 logs.exec("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT, process_uuid TEXT, feedback_log_body TEXT)");
@@ -52,10 +54,15 @@ putLog.run("019f5e42-c59b-74b0-bea6-729499fbd397", "pid:56297:aa837eb9-c72c-4607
 putLog.run("019f53eb-dd2a-7090-a519-2f254aa3d892", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "session_loop: Agent loop exited");
 putLog.run("019f53eb-ddfe-75f1-94ac-cfe863b62c5f", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "archived thread");
 putLog.run("019f5962-8192-7aa2-bd2b-027847998880", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "idle unknown process");
+putLog.run("019f5962-8192-7aa2-bd2b-027847998881", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "resumed turn");
 NODE
 
 helper() {
   CODEX_THREAD_ID="$CURRENT_THREAD" FM_CODEX_STATE_DB="$STATE_DB" FM_CODEX_LOGS_DB="$LOGS_DB" "$HELPER" "$@"
+}
+
+helper_for_thread() {
+  CODEX_THREAD_ID="$1" FM_CODEX_STATE_DB="$STATE_DB" FM_CODEX_LOGS_DB="$LOGS_DB" "$HELPER" "${@:2}"
 }
 
 token=$(helper current)
@@ -69,6 +76,8 @@ pass "Codex lock identity combines the stable thread id with its runtime process
 [ "$(helper classify "codex-thread:$ARCHIVED_THREAD:$PROCESS_B")" = dead ] || fail "archived Codex thread was not dead"
 [ "$(helper classify "codex-thread:$UNKNOWN_THREAD:$PROCESS_B")" = unknown ] || fail "unprovable foreign process was not unknown"
 [ "$(helper classify malformed)" = unknown ] || fail "malformed token was not unknown"
+[ "$(helper_for_thread "$RESUMED_THREAD" classify "codex-thread:$RESUMED_THREAD:$PROCESS_A")" = dead ] \
+  || fail "same Codex thread's previous runtime process was not dead"
 pass "Codex lock liveness distinguishes live, dead, and unprovable holders"
 
 PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" CODEX_THREAD_ID="$CURRENT_THREAD" \
@@ -91,3 +100,12 @@ PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" CODEX_THREAD_ID="$PEER_THREAD" \
 expected_peer="codex-thread:$PEER_THREAD:$PROCESS_A"
 [ "$(cat "$HOME_DIR/state/.lock")" = "$expected_peer" ] || fail "peer did not replace the archived holder token"
 pass "an archived Codex holder yields its stale lock safely"
+
+printf '%s\n' "codex-thread:$RESUMED_THREAD:$PROCESS_A" > "$HOME_DIR/state/.lock"
+PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" CODEX_THREAD_ID="$RESUMED_THREAD" \
+  FM_CODEX_STATE_DB="$STATE_DB" FM_CODEX_LOGS_DB="$LOGS_DB" "$LOCK" >/dev/null \
+  || fail "resumed Codex thread did not replace its previous runtime process token"
+expected_resumed="codex-thread:$RESUMED_THREAD:$PROCESS_B"
+[ "$(cat "$HOME_DIR/state/.lock")" = "$expected_resumed" ] \
+  || fail "resumed Codex thread did not persist its current runtime process token"
+pass "a resumed Codex thread replaces its stale runtime process lock"

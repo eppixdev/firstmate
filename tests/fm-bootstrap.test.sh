@@ -38,7 +38,12 @@ unset TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_SESSION HERDR_SOCKET_PATH \
 make_fake_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
-  fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi lavish-axi
+  fm_fake_exit0 "$fakebin" tmux chrome-devtools-axi lavish-axi
+  cat > "$fakebin/node" <<'SH'
+#!/usr/bin/env bash
+exit "${FM_FAKE_NODE_SQLITE_STATUS:-0}"
+SH
+  chmod +x "$fakebin/node"
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
@@ -426,6 +431,19 @@ ROWS
   pass "bootstrap enforces no-mistakes minimum version"
 }
 
+test_node_sqlite_capability() {
+  local case_dir fakebin out expected
+  case_dir="$TMP_ROOT/node-sqlite"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_NODE_SQLITE_STATUS=1 "$ROOT/bin/fm-bootstrap.sh")
+  expected="MISSING: node (install: brew install node  # or the platform's package manager)"
+  [ "$out" = "$expected" ] || fail "node without node:sqlite DatabaseSync should report an actionable upgrade, got: $out"
+  pass "bootstrap requires node:sqlite DatabaseSync support"
+}
+
 test_git_is_required_with_supported_install_instruction() {
   local case_dir fakebin bash_env out expected
   case_dir="$TMP_ROOT/git-required"
@@ -802,6 +820,7 @@ ROWS
 
 test_bootstrap_reporting
 test_github_auth_detection
+test_node_sqlite_capability
 test_no_mistakes_min_version
 test_git_is_required_with_supported_install_instruction
 test_orca_backend_gates_orca_tool_only_when_selected
