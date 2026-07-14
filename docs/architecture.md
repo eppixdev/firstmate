@@ -94,6 +94,7 @@ Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to lock-holder-specific read-only wording with no repair command.
 Managed Codex sandboxes hide the harness behind a PID namespace, so `fm-lock.sh` falls back to `CODEX_THREAD_ID` plus the thread's Codex runtime-process identity from the local read-only runtime databases.
 Another thread in that live runtime is confirmed contention, while an archived thread or one whose agent loop exited is stale and may yield the lock.
+Legacy numeric harness-PID locks remain compatible, but a managed Codex observer cannot prove that a PID hidden by its namespace is stale, so it preserves that lock and reports indeterminate liveness.
 If neither visible harness ancestry nor a provable managed-Codex identity or holder state is available, session start stays fail-closed and read-only, and both surfaces use ownership-neutral wording instead of claiming another session exists.
 
 The managed-sandbox path was verified on 2026-07-13 with Codex CLI 0.144.1 under the real `bwrap --unshare-pid --proc /proc` tool-call wrapper.

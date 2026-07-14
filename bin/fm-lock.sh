@@ -4,6 +4,9 @@
 # Managed Codex sandboxes hide that process behind a PID namespace, so Codex
 # falls back to a thread plus runtime-process identity resolved read-only by
 # fm-codex-lock-identity.mjs.
+# Existing numeric harness-PID locks remain valid; a managed Codex observer
+# preserves one when PID-namespace isolation makes its liveness indeterminate.
+# FM_CODEX_LOCK_HELPER is a test-only executable-path override.
 # Usage: fm-lock.sh           acquire; exit 1 if another live session holds it,
 #                            exit 2 if identity or holder liveness is unavailable
 #        fm-lock.sh status    print holder and liveness; always exits 0
