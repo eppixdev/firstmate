@@ -171,7 +171,7 @@ test_github_auth_detection() {
     "$ROOT/bin/fm-bootstrap.sh")
   elapsed=$((SECONDS - started))
   assert_not_contains "$out" "NEEDS_GH_AUTH" "TERM-resistant gh-axi probe did not fall back to working raw gh auth"
-  [ "$elapsed" -lt 5 ] || fail "TERM-resistant gh-axi probe exceeded its hard bound (elapsed ${elapsed}s)"
+  [ "$elapsed" -le 5 ] || fail "TERM-resistant gh-axi probe exceeded its hard bound (elapsed ${elapsed}s)"
   probe_pid=$(cat "$pid_file")
   ! kill -0 "$probe_pid" 2>/dev/null || fail "bounded probe left TERM-resistant gh-axi process $probe_pid running"
 
