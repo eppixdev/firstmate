@@ -8,6 +8,8 @@
 #   - the lock-refusal read-only path: banner leads, every mutating step is
 #     skipped (including bootstrap's four mutating sweeps, verified by their
 #     ABSENCE), the digest still completes
+#   - managed Codex sandbox identity: hidden harness ancestry falls back to a
+#     stable Codex thread/runtime token and keeps the session writable
 #   - output section ordering: diagnostics/banners lead, bulk file dumps follow
 #   - context-aware next-step guidance for read-only, AFK, X mode, and normal
 #     watcher ownership
@@ -103,6 +105,20 @@ esac
 exit 1
 SH
   chmod +x "$fakebin/ps"
+}
+
+make_fake_codex_lock_helper() {
+  local fakebin=$1
+  cat > "$fakebin/codex-lock-helper" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-}" in
+  current) printf '%s\n' "${FM_FAKE_CODEX_TOKEN:?}" ;;
+  classify) printf '%s\n' "${FM_FAKE_CODEX_HOLDER_STATE:-unknown}" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$fakebin/codex-lock-helper"
 }
 
 make_fake_ps_harness() {
@@ -371,7 +387,7 @@ EOF
 
   expect_code 0 "$status" "fm-session-start.sh must complete when lock identity is unavailable"
   assert_contains "$out" "FLEET LOCK IDENTITY IS UNAVAILABLE" "identity failure did not receive its distinct read-only banner"
-  assert_contains "$out" "cannot locate harness process in ancestry" "identity failure did not preserve fm-lock.sh's diagnostic"
+  assert_contains "$out" "cannot establish a live session identity" "identity failure did not preserve fm-lock.sh's diagnostic"
   assert_contains "$out" "could not be determined or confirmed because the active harness identity is unavailable." "identity failure did not state that contention was indeterminate"
   assert_not_contains "$out" "No competing session was detected" "identity failure falsely denied possible lock contention"
   assert_contains "$out" "fleet-lock ownership is unavailable" "identity failure did not propagate to queued-wake guard wording"
@@ -382,6 +398,30 @@ EOF
   assert_not_contains "$out" "session holding the fleet lock" "identity failure helper output claimed a competing lock holder"
 
   pass "a missing harness identity stays safe without falsely claiming another live session"
+}
+
+test_managed_codex_sandbox_identity_path() {
+  local rec root home fakebin out status token
+  rec=$(new_world managed-codex-sandbox)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_without_harness "$fakebin"
+  make_fake_codex_lock_helper "$fakebin"
+  token=codex-thread:019f5e42-c487-76c1-b079-9fafa203bcea:pid:56297:aa837eb9-c72c-4607-a8f8-912fb4e58add
+
+  status=0
+  out=$(CODEX_THREAD_ID=019f5e42-c487-76c1-b079-9fafa203bcea \
+    FM_CODEX_LOCK_HELPER="$fakebin/codex-lock-helper" FM_FAKE_CODEX_TOKEN="$token" \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+
+  expect_code 0 "$status" "managed Codex session start must complete"
+  assert_contains "$out" "lock acquired: Codex thread 019f5e42-c487-76c1-b079-9fafa203bcea" "managed Codex thread identity did not acquire the lock"
+  assert_not_contains "$out" "READ-ONLY SESSION" "managed Codex thread was incorrectly forced read-only"
+  [ "$(cat "$home/state/.lock")" = "$token" ] || fail "managed Codex token was not written to the per-home lock"
+
+  pass "managed Codex sandbox identity keeps session start writable without visible harness ancestry"
 }
 
 # --- output ordering ----------------------------------------------------------
@@ -788,6 +828,7 @@ EOF
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
 test_lock_identity_unavailable_read_only_path
+test_managed_codex_sandbox_identity_path
 test_output_ordering_diagnostics_lead
 test_herdr_backend_diagnostics_follow_real_session_start
 test_status_tail_bounding

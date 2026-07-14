@@ -92,7 +92,12 @@ Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
 `fm-tangle-lib.sh` resolves the default branch from `origin/HEAD`, then local `main` or `master`, and classifies that named non-default primary branch as the tangle.
 `fm-guard.sh` prints the repair command on the next mutable fleet action, while `bin/fm-session-start.sh` reports the same condition through bootstrap as a `TANGLE:` line at session start.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to lock-holder-specific read-only wording with no repair command.
-If process ancestry hides the active harness identity, session start cannot establish lock ownership, stays fail-closed and read-only, and both surfaces use ownership-neutral wording instead of claiming another session exists.
+Managed Codex sandboxes hide the harness behind a PID namespace, so `fm-lock.sh` falls back to `CODEX_THREAD_ID` plus the thread's Codex runtime-process identity from the local read-only runtime databases.
+Another thread in that live runtime is confirmed contention, while an archived thread or one whose agent loop exited is stale and may yield the lock.
+If neither visible harness ancestry nor a provable managed-Codex identity or holder state is available, session start stays fail-closed and read-only, and both surfaces use ownership-neutral wording instead of claiming another session exists.
+
+The managed-sandbox path was verified on 2026-07-13 with Codex CLI 0.144.1 under the real `bwrap --unshare-pid --proc /proc` tool-call wrapper.
+The visible ancestry was `zsh -> bwrap`, `CODEX_THREAD_ID` remained available, and an isolated `FM_HOME` run of `bin/fm-session-start.sh` printed `lock acquired: Codex thread 019f5e42-c487-76c1-b079-9fafa203bcea` instead of entering read-only mode.
 Ship briefs also tell the crewmate to verify `pwd -P` and `git rev-parse --show-toplevel` before creating `fm/<id>`, then stop with a blocked status if it landed in the primary checkout.
 
 ## No-mistakes gate authority boundary

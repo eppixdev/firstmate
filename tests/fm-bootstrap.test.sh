@@ -30,7 +30,8 @@ export FM_BACKEND_CMUX_BUNDLE_BIN="$TMP_ROOT/no-bundled-cmux"
 # them once so the suite resolves the tmux reference backend unless a case says
 # otherwise - the same hermeticity discipline as pinning PATH via BASE_PATH.
 unset TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_SESSION HERDR_SOCKET_PATH \
-  CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_SOCKET_PATH CMUX_TAB_ID CMUX_PANEL_ID 2>/dev/null || true
+  CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_SOCKET_PATH CMUX_TAB_ID CMUX_PANEL_ID \
+  CODEX_SANDBOX_NETWORK_DISABLED 2>/dev/null || true
 
 # A fake toolchain where every required tool is present and GitHub is authenticated.
 # treehouse's `get --help` advertises --lease only when FM_FAKE_TREEHOUSE_LEASE_HELP=1.
@@ -50,7 +51,10 @@ if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
     [ -z "${FM_FAKE_GH_AXI_PID_FILE:-}" ] || printf '%s\n' "$$" > "$FM_FAKE_GH_AXI_PID_FILE"
     exec sleep 300
   fi
-  [ "${FM_FAKE_GH_AXI_SIGNAL:-0}" != 1 ] || kill -TERM "$$"
+  # KILL is intentionally used for this status-propagation fixture because a
+  # parent harness may start non-interactive shells with TERM ignored, and an
+  # ignored signal cannot be reset by the child shell.
+  [ "${FM_FAKE_GH_AXI_SIGNAL:-0}" != 1 ] || kill -KILL "$$"
   exit "${FM_FAKE_GH_AXI_STATUS:-0}"
 fi
 exit 0

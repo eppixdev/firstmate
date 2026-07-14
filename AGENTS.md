@@ -124,9 +124,10 @@ Run `bin/fm-session-start.sh`.
 It composes today's `fm-lock.sh`, `fm-bootstrap.sh`, and `fm-wake-drain.sh` - calling each as a real subprocess, never reimplementing their logic - then prints a full context digest and fleet-state digest, in one ordered, clearly delimited report:
 
 1. **Lock** - acquires the per-home session lock first, before anything mutates shared state.
+   It uses the visible harness process when available and a read-only Codex thread/runtime identity when the managed Codex sandbox hides process ancestry.
 2. **Bootstrap** - detect-only diagnostics (tool/version problems, GitHub auth, the worktree-tangle check, harness override, dispatch-profile validation, backlog-backend status) always run and always print.
    When the lock could not be acquired because another live session holds it, the worktree-tangle check uses read-only advisory wording that leaves repair to that session.
-   When lock identity is unavailable because the harness process is hidden from ancestry, the same check uses ownership-neutral read-only wording.
+   When neither visible harness ancestry nor a live managed-Codex identity is available, the same check uses ownership-neutral read-only wording.
    The four MUTATING sweeps - fleet sync, the local secondmate fast-forward sweep, the secondmate liveness sweep, and X-mode artifact writes - run only when this session actually holds the lock from step 1.
    The secondmate liveness sweep deterministically guarantees every registered secondmate is actually running: it probes each live secondmate's endpoint for a real agent process (not just pane presence) and respawns only on a confident dead reading, reported as `SECONDMATE_LIVENESS:` lines (`bin/fm-bootstrap.sh`; `bin/fm-backend.sh`'s `fm_backend_agent_alive`).
 3. **Wake queue** - when locked, drains the durable wake queue and prints the records prominently as this turn's first work queue, exactly as `bin/fm-wake-drain.sh` did before; a lapsed watcher chain still surfaces here via the same guard banner.
@@ -148,7 +149,7 @@ Those three composed scripts also keep working standalone, unchanged, for the fl
 
 If the digest's lock step could not acquire the lock, it prints a loud, bordered read-only banner instead of silently continuing, skips every mutating step, and runs only the read-only-safe subset described above.
 Exit 1 from `bin/fm-lock.sh` confirms contention by another live session, so tell the captain that session is managing the work.
-Exit 2 means the active harness identity is unavailable from process ancestry, so report that lock contention could not be determined or confirmed.
+Exit 2 means session identity or recorded-holder liveness cannot be established safely, so report that lock contention could not be determined or confirmed.
 In either case, operate read-only until resolved - do not spawn, steer, merge, or otherwise mutate fleet state from this session.
 
 Bootstrap is detect, then consent, then install.
