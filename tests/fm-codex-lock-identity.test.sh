@@ -19,6 +19,7 @@ EXITED_THREAD=019f53eb-dd2a-7090-a519-2f254aa3d892
 ARCHIVED_THREAD=019f53eb-ddfe-75f1-94ac-cfe863b62c5f
 UNKNOWN_THREAD=019f5962-8192-7aa2-bd2b-027847998880
 RESUMED_THREAD=019f5962-8192-7aa2-bd2b-027847998881
+EXITED_RESUMED_THREAD=019f5962-8192-7aa2-bd2b-027847998882
 PROCESS_A=pid:56297:aa837eb9-c72c-4607-a8f8-912fb4e58add
 PROCESS_B=pid:86213:340d61e5-c357-4276-afb6-8e679aabb284
 
@@ -45,6 +46,7 @@ putThread.run("019f53eb-dd2a-7090-a519-2f254aa3d892", 0);
 putThread.run("019f53eb-ddfe-75f1-94ac-cfe863b62c5f", 1);
 putThread.run("019f5962-8192-7aa2-bd2b-027847998880", 0);
 putThread.run("019f5962-8192-7aa2-bd2b-027847998881", 0);
+putThread.run("019f5962-8192-7aa2-bd2b-027847998882", 0);
 
 const logs = new DatabaseSync(process.env.FM_CODEX_LOGS_DB);
 logs.exec("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT, process_uuid TEXT, feedback_log_body TEXT)");
@@ -55,6 +57,7 @@ putLog.run("019f53eb-dd2a-7090-a519-2f254aa3d892", "pid:86213:340d61e5-c357-4276
 putLog.run("019f53eb-ddfe-75f1-94ac-cfe863b62c5f", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "archived thread");
 putLog.run("019f5962-8192-7aa2-bd2b-027847998880", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "idle unknown process");
 putLog.run("019f5962-8192-7aa2-bd2b-027847998881", "pid:86213:340d61e5-c357-4276-afb6-8e679aabb284", "resumed turn");
+putLog.run("019f5962-8192-7aa2-bd2b-027847998882", "pid:56297:aa837eb9-c72c-4607-a8f8-912fb4e58add", "resumed session: Agent loop exited");
 NODE
 
 helper() {
@@ -75,6 +78,8 @@ pass "Codex lock identity combines the stable thread id with its runtime process
 [ "$(helper classify "codex-thread:$EXITED_THREAD:$PROCESS_B")" = dead ] || fail "exited Codex thread was not dead"
 [ "$(helper classify "codex-thread:$ARCHIVED_THREAD:$PROCESS_B")" = dead ] || fail "archived Codex thread was not dead"
 [ "$(helper classify "codex-thread:$UNKNOWN_THREAD:$PROCESS_B")" = unknown ] || fail "unprovable foreign process was not unknown"
+[ "$(helper classify "codex-thread:$EXITED_RESUMED_THREAD:$PROCESS_B")" = dead ] \
+  || fail "exited resumed peer was treated as live because it shared the current runtime process"
 [ "$(helper classify malformed)" = unknown ] || fail "malformed token was not unknown"
 [ "$(helper_for_thread "$RESUMED_THREAD" classify "codex-thread:$RESUMED_THREAD:$PROCESS_A")" = dead ] \
   || fail "same Codex thread's previous runtime process was not dead"

@@ -87,12 +87,11 @@ function classify(token, state, logs) {
   if (threadArchived(state, holderThread)) return "dead";
 
   const holderLog = latestLog(logs, holderThread);
-  if (holderLog?.process_uuid === holderProcess && agentLoopExited(holderLog)) return "dead";
+  if (holderLog && agentLoopExited(holderLog)) return "dead";
 
   if (currentProcess && holderLog?.process_uuid === currentProcess) return "live";
   if (currentProcess && holderProcess === currentProcess) return "live";
 
-  if (holderLog && agentLoopExited(holderLog)) return "dead";
   return "unknown";
 }
 
